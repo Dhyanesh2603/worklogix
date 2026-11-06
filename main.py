@@ -137,6 +137,28 @@ LIGHT_THEME_QSS = """
         border: none;
         border-bottom: 1px solid #E2E8F0;
     }
+    QMessageBox, QDialog {
+        background-color: #FFFFFF;
+        color: #0F172A;
+    }
+    QMessageBox QLabel, QDialog QLabel {
+        color: #0F172A;
+        font-size: 13px;
+        background-color: transparent;
+    }
+    QMessageBox QPushButton, QDialog QPushButton {
+        background-color: #0F172A;
+        color: #FFFFFF;
+        font-weight: 600;
+        font-size: 13px;
+        border-radius: 6px;
+        padding: 8px 24px;
+        min-width: 80px;
+        border: none;
+    }
+    QMessageBox QPushButton:hover, QDialog QPushButton:hover {
+        background-color: #1E293B;
+    }
 """
 
 DARK_THEME_QSS = """
@@ -257,6 +279,28 @@ DARK_THEME_QSS = """
         border: none;
         border-bottom: 1px solid #374151;
     }
+    QMessageBox, QDialog {
+        background-color: #1E293B;
+        color: #F8FAFC;
+    }
+    QMessageBox QLabel, QDialog QLabel {
+        color: #F8FAFC;
+        font-size: 13px;
+        background-color: transparent;
+    }
+    QMessageBox QPushButton, QDialog QPushButton {
+        background-color: #38BDF8;
+        color: #0F172A;
+        font-weight: 700;
+        font-size: 13px;
+        border-radius: 6px;
+        padding: 8px 24px;
+        min-width: 80px;
+        border: none;
+    }
+    QMessageBox QPushButton:hover, QDialog QPushButton:hover {
+        background-color: #7DD3FC;
+    }
 """
 
 def create_app_icon() -> QIcon:
@@ -354,6 +398,7 @@ class TimeTrackerApp(QMainWindow):
         self.setWindowTitle("Office Work Session Tracker")
         self.setMinimumSize(880, 680)
         self.setWindowIcon(create_app_icon())
+        self._was_maximized = False
 
         self.current_theme = "light"
 
@@ -417,6 +462,13 @@ class TimeTrackerApp(QMainWindow):
         self.card_inactive["val"].setStyleSheet(f"font-size: 24px; font-weight: 700; color: {self.metric_inactive_color}; font-family: 'JetBrains Mono', monospace;")
         self.card_lunch["val"].setStyleSheet(f"font-size: 24px; font-weight: 700; color: {self.metric_lunch_color}; font-family: 'JetBrains Mono', monospace;")
 
+        # Set native window palette background so Windows never paints white space on resize
+        bg_col = QColor("#F8FAFC" if self.current_theme == "light" else "#0B0F17")
+        pal = self.palette()
+        pal.setColor(QPalette.ColorRole.Window, bg_col)
+        pal.setColor(QPalette.ColorRole.Base, bg_col)
+        self.setPalette(pal)
+
     def toggle_theme(self):
         self.current_theme = "dark" if self.current_theme == "light" else "light"
         self.apply_theme()
@@ -424,6 +476,7 @@ class TimeTrackerApp(QMainWindow):
     def init_ui(self):
         central_widget = QWidget()
         central_widget.setObjectName("centralWidget")
+        central_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(28, 22, 28, 22)
@@ -534,7 +587,7 @@ class TimeTrackerApp(QMainWindow):
         self.btn_tray = QPushButton("Minimize to Background")
         self.btn_tray.setObjectName("btnSecondary")
         self.btn_tray.setMinimumHeight(42)
-        self.btn_tray.clicked.connect(self.hide)
+        self.btn_tray.clicked.connect(self.action_minimize_to_tray)
         controls_layout.addWidget(self.btn_tray)
 
         main_layout.addLayout(controls_layout)
@@ -606,16 +659,31 @@ class TimeTrackerApp(QMainWindow):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.show_and_activate()
 
+    def action_minimize_to_tray(self):
+        self._was_maximized = self.isMaximized()
+        self.hide()
+
     def show_and_activate(self):
         self.show()
+        if getattr(self, "_was_maximized", False):
+            self.showMaximized()
+        else:
+            self.showNormal()
         self.raise_()
         self.activateWindow()
 
     def changeEvent(self, event):
         if event.type() == event.Type.WindowStateChange:
+            if not self.isMinimized():
+                self._was_maximized = self.isMaximized()
             if self.isMinimized():
                 self.hide()
         super().changeEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self.isMinimized():
+            self._was_maximized = self.isMaximized()
 
     def closeEvent(self, event):
         if self.engine.state != TrackerState.LOGGED_OUT:
