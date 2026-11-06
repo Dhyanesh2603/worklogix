@@ -1,0 +1,34 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller & Build outputs
+build/
+dist/
+*.spec
+
+# Local Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+
+# Databases & local stores
+*.db
+*.sqlite3
+
+# Generated report exports
+*.xlsx
+*.log
+
+# Virtual Environments
+.venv/
+env/
+venv/
+ENV/
+
+# IDE / Editor configuration
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
