@@ -574,8 +574,9 @@ def get_daily_report(date_str: str) -> Dict[str, Any]:
 def get_monthly_report(year: int, month: int) -> Dict[str, Any]:
     try:
         client = get_supabase_client()
+        last_day = calendar.monthrange(year, month)[1]
         start_date = f"{year:04d}-{month:02d}-01"
-        end_date = f"{year:04d}-{month:02d}-31"
+        end_date = f"{year:04d}-{month:02d}-{last_day:02d}"
         
         emps = client.table("employees").select("*").order("name").execute().data or []
         sess = client.table("sessions").select("*").gte("date", start_date).lte("date", end_date).execute().data or []
@@ -657,8 +658,9 @@ def get_monthly_report(year: int, month: int) -> Dict[str, Any]:
 def get_monthly_website_usage(year: int, month: int) -> List[Dict[str, Any]]:
     try:
         client = get_supabase_client()
+        last_day = calendar.monthrange(year, month)[1]
         start_date = f"{year:04d}-{month:02d}-01"
-        end_date = f"{year:04d}-{month:02d}-31"
+        end_date = f"{year:04d}-{month:02d}-{last_day:02d}"
         
         sess_res = client.table("sessions").select("id, employee_id, employees(name)").gte("date", start_date).lte("date", end_date).execute()
         sessions = sess_res.data or []
