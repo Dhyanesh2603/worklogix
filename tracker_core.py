@@ -120,6 +120,10 @@ class TrackerEngine:
         self.state = TrackerState.LOGGED_OUT
         self.session_id: Optional[int] = None
         self.employee_id: Optional[int] = None
+        self.session_start_datetime: Optional[datetime] = None
+        self.is_session_started_in_shift: bool = False
+        self.manual_clock_out_date: Optional[date] = None
+
         # Cumulative totals for current session (in seconds)
         self.total_active_sec = 0
         self.total_inactive_sec = 0
@@ -142,7 +146,7 @@ class TrackerEngine:
     def set_idle_threshold(self, seconds: int):
         self.idle_threshold = max(5, seconds)
 
-    def start_day(self, employee_id: int):
+    def start_day(self, employee_id: int, is_auto: bool = False):
         """Clock In: Starts a new day session."""
         if self.state != TrackerState.LOGGED_OUT:
             return
@@ -151,6 +155,27 @@ class TrackerEngine:
         self.session_id = database.create_session(employee_id)
         
         now = datetime.now()
+        self.session_start_datetime = now
+        self.manual_clock_out_date = None
+
+        # Detect whether this session started within the scheduled shift
+        try:
+            cfg = database.get_employee_shift(employee_id)
+            if cfg and "shift_start" in cfg and "shift_end" in cfg:
+                s_parts = [int(p) for p in cfg["shift_start"].split(":")]
+                e_parts = [int(p) for p in cfg["shift_end"].split(":")]
+                s_time = dtime(s_parts[0], s_parts[1])
+                e_time = dtime(e_parts[0], e_parts[1])
+                now_t = now.time()
+                if s_time > e_time:
+                    self.is_session_started_in_shift = (now_t >= s_time or now_t < e_time)
+                else:
+                    self.is_session_started_in_shift = (s_time <= now_t < e_time)
+            else:
+                self.is_session_started_in_shift = False
+        except Exception:
+            self.is_session_started_in_shift = False
+
         self.total_active_sec = 0
         self.total_inactive_sec = 0
         self.total_lunch_sec = 0
@@ -201,10 +226,13 @@ class TrackerEngine:
         if self.on_state_change:
             self.on_state_change(self.state)
 
-    def end_day(self):
+    def end_day(self, manual: bool = False):
         """Clock Out: Ends the current workday."""
         if self.state == TrackerState.LOGGED_OUT:
             return
+
+        if manual:
+            self.manual_clock_out_date = datetime.now().date()
 
         now = datetime.now()
         # Commit the active/lunch/inactive interval that was running
@@ -221,6 +249,8 @@ class TrackerEngine:
 
         self.state = TrackerState.LOGGED_OUT
         self.session_id = None
+        self.session_start_datetime = None
+        self.is_session_started_in_shift = False
         self.total_active_sec = 0
         self.total_inactive_sec = 0
         self.total_lunch_sec = 0
