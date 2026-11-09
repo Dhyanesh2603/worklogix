@@ -405,24 +405,19 @@ class TimeTrackerApp(QMainWindow):
         # Initialize DB & Core Engine
         database.init_db()
 
-        # Check authenticated employee (permanent login)
+        # Check authenticated employee (permanent login - never asks again)
         self.emp = database.get_authenticated_employee()
         if not self.emp:
             all_emps = database.get_all_employees()
-            if not all_emps:
+            if all_emps:
+                self.emp = all_emps[0]
+                database.set_authenticated_employee(self.emp["id"])
+            else:
                 QMessageBox.warning(
                     None,
                     "Account Setup Required",
-                    "No employee accounts found in the database.\n\nPlease log in to the Admin Portal (http://localhost:8000/admin) to register your employee account first."
+                    "No employee accounts found in the database.\n\nPlease open the Admin Portal (http://localhost:8000/admin) to register an employee account first."
                 )
-                sys.exit(0)
-
-            dialog = EmployeeAuthDialog(None)
-            if dialog.exec() and dialog.authenticated_emp:
-                self.emp = dialog.authenticated_emp
-                database.set_authenticated_employee(self.emp["id"])
-            else:
-                # Cancelled or closed without valid credentials
                 sys.exit(0)
 
         # Initialize tracking engine with employee's assigned threshold
@@ -536,10 +531,10 @@ class TimeTrackerApp(QMainWindow):
 
         profile_layout.addStretch()
 
-        btn_switch = QPushButton("Sign Out / Switch")
-        btn_switch.setObjectName("btnUtility")
-        btn_switch.clicked.connect(self.switch_account)
-        profile_layout.addWidget(btn_switch)
+        # Permanent Workstation Login - Employee cannot log out
+        badge_active = QLabel("● Workstation Active")
+        badge_active.setStyleSheet("color: #059669; font-weight: 600; font-size: 13px;")
+        profile_layout.addWidget(badge_active)
 
         main_layout.addWidget(profile_frame)
 
@@ -745,22 +740,61 @@ class TimeTrackerApp(QMainWindow):
         self.engine.set_idle_threshold(assigned_threshold)
         self.engine.start_day(emp_id)
 
+        now_str = datetime.now().strftime("%I:%M:%S %p")
         self.btn_clock_in.setEnabled(False)
         self.btn_lunch.setEnabled(True)
         self.btn_clock_out.setEnabled(True)
         self.act_tray_lunch.setEnabled(True)
-        self.card_start["val"].setText(datetime.now().strftime("%I:%M:%S %p"))
+        self.card_start["val"].setText(now_str)
         self.table_logs.setRowCount(0)
 
+        # Informative Shift Started Popup
+        st = self.emp.get("shift_start", "09:30") if self.emp else "09:30"
+        et = self.emp.get("shift_end", "18:00") if self.emp else "18:00"
+        emp_name = self.emp.get("name", "Employee") if self.emp else "Employee"
+        emp_code = self.emp.get("employee_code", "") if self.emp else ""
+        QMessageBox.information(
+            self,
+            "Shift Started",
+            f"Work shift clocked in successfully at {now_str}!\n\n"
+            f"Employee: {emp_name} ({emp_code})\n"
+            f"Assigned Shift: {st} to {et}\n\n"
+            "Hardware activity and application focus are now being monitored."
+        )
+
     def action_toggle_lunch(self):
+        now_str = datetime.now().strftime("%I:%M:%S %p")
         if self.engine.state == TrackerState.LUNCH:
+            # Resuming work from lunch
             self.engine.resume_from_lunch()
             self.btn_lunch.setText("Take Lunch Break")
             self.act_tray_lunch.setText("Take Lunch Break")
+            QMessageBox.information(
+                self,
+                "Work Resumed",
+                f"Welcome back! Lunch break ended at {now_str}.\n\n"
+                "Active work tracking and inactivity detection have resumed."
+            )
         else:
-            self.engine.start_lunch()
-            self.btn_lunch.setText("Resume Work")
-            self.act_tray_lunch.setText("Resume Work")
+            # Starting lunch break with confirmation
+            reply = QMessageBox.question(
+                self,
+                "Confirm Lunch Break",
+                "Would you like to start your lunch break now?\n\n"
+                "Inactivity detection will be paused while you are on break.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.engine.start_lunch()
+                self.btn_lunch.setText("Resume Work")
+                self.act_tray_lunch.setText("Resume Work")
+                QMessageBox.information(
+                    self,
+                    "Lunch Break Started",
+                    f"Lunch break started at {now_str}.\n\n"
+                    "Enjoy your meal! Click 'Resume Work' when you return to your workstation."
+                )
 
     def action_clock_out(self):
         reply = QMessageBox.question(
@@ -779,13 +813,19 @@ class TimeTrackerApp(QMainWindow):
             self.act_tray_lunch.setEnabled(False)
             self.card_start["val"].setText("--:--")
 
+            now_str = datetime.now().strftime("%I:%M:%S %p")
+            total_active = self.card_active['val'].text()
+            total_idle = self.card_inactive['val'].text()
+            total_lunch = self.card_lunch['val'].text()
+
             QMessageBox.information(
                 self,
                 "Shift Ended",
-                f"Clock-out logged successfully!\n\n"
-                f"Total Active Work: {self.card_active['val'].text()}\n"
-                f"Total Inactivity: {self.card_inactive['val'].text()}\n"
-                f"Total Lunch: {self.card_lunch['val'].text()}"
+                f"Clock-out logged successfully at {now_str}!\n\n"
+                f"• Total Active Work:  {total_active}\n"
+                f"• Total Inactivity:   {total_idle}\n"
+                f"• Total Lunch Break:  {total_lunch}\n\n"
+                "Your daily work session has concluded."
             )
 
     def handle_state_change(self, new_state: TrackerState):
@@ -802,6 +842,13 @@ class TimeTrackerApp(QMainWindow):
             self.act_tray_lunch.setEnabled(True)
             if self.card_start["val"].text() == "--:--":
                 self.card_start["val"].setText(datetime.now().strftime("%I:%M:%S %p"))
+                if hasattr(self, 'tray_icon') and self.emp:
+                    self.tray_icon.showMessage(
+                        "WorkLogix - Shift Started",
+                        f"Assigned shift ({self.emp.get('shift_start', '09:30')} - {self.emp.get('shift_end', '18:00')}) is now active.",
+                        QSystemTrayIcon.MessageIcon.Information,
+                        3000
+                    )
         elif new_state == TrackerState.INACTIVE:
             self.status_badge.setText("AWAY / INACTIVE")
             self.status_badge.setStyleSheet("""

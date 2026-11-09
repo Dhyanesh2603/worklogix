@@ -6,7 +6,17 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import supabase_db
 
-DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracker_data.db")
+def get_app_data_dir() -> str:
+    """Returns persistent application data directory for WorkLogix across all runs."""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        app_dir = os.path.join(local_app_data, "WorkLogix")
+    else:
+        app_dir = os.path.join(os.path.expanduser("~"), ".worklogix")
+    os.makedirs(app_dir, exist_ok=True)
+    return app_dir
+
+DB_FILE = os.path.join(get_app_data_dir(), "tracker_data.db")
 
 def hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
     if not salt:
@@ -211,9 +221,14 @@ def set_employee_pin(employee_id: int, new_pin: str) -> bool:
     return updated
 
 def get_authenticated_employee() -> Optional[Dict[str, Any]]:
-    """Retrieves locally persisted employee from settings table."""
+    """Retrieves locally persisted employee from settings table, auto-selecting default if not set."""
     emp_id_str = get_setting("auth_employee_id", "")
     if not emp_id_str or not emp_id_str.isdigit():
+        all_emps = get_all_employees()
+        if all_emps:
+            first_emp = all_emps[0]
+            set_authenticated_employee(first_emp["id"])
+            return first_emp
         return None
     emp_id = int(emp_id_str)
     if supabase_db.is_supabase_enabled():

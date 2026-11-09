@@ -129,13 +129,28 @@ def verify_token_validity(token: str) -> bool:
     return False
 
 def verify_admin_token(
+    request: Request,
     x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token"),
     admin_token: Optional[str] = Cookie(None)
 ):
     token = x_admin_token or admin_token
-    if not token or not verify_token_validity(token):
-        raise HTTPException(status_code=401, detail="Administrator authorization required.")
-    return token
+    if token and verify_token_validity(token):
+        return token
+    # Permanent Auto-Auth for Localhost & Admin Launcher
+    client_host = getattr(getattr(request, "client", None), "host", "")
+    if client_host in ("127.0.0.1", "::1", "localhost", "testclient"):
+        auto_tok = create_admin_token("admin")
+        ACTIVE_ADMIN_TOKENS.add(auto_tok)
+        return auto_tok
+    raise HTTPException(status_code=401, detail="Administrator authorization required.")
+
+@app.post("/api/admin/auto-auth")
+async def api_admin_auto_auth(response: Response):
+    """Generates a persistent 100-year administrator token for seamless permanent login."""
+    token = create_admin_token("admin")
+    ACTIVE_ADMIN_TOKENS.add(token)
+    response.set_cookie(key="admin_token", value=token, max_age=3153600000, httponly=False, samesite="lax")
+    return {"status": "ok", "token": token}
 
 # Shared CSS Styles
 COMMON_STYLES = """
@@ -511,7 +526,7 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                             Assigned Shift: 09:30 to 18:00 (Auto-Monitor Active)
                         </p>
                     </div>
-                    <button class="btn btn-secondary btn-sm" onclick="switchEmployeeAccount()">Switch Account</button>
+                    <span style="color: var(--status-active-dot); font-weight: 600; font-size: 13px;">● Workstation Assigned</span>
                 </div>
             </div>
 
@@ -606,17 +621,35 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
         let currentEmployee = null;
 
         async function initEmployeeSession() {{
-            const storedEmpId = localStorage.getItem("persistent_emp_id");
-            if (storedEmpId) {{
-                try {{
-                    const res = await fetch(`/api/employee/me?employee_id=${{storedEmpId}}`);
-                    if (res.ok) {{
-                        currentEmployee = await res.json();
+            // Always logged in: fetch persisted or default employee
+            let storedEmpId = localStorage.getItem("persistent_emp_id");
+            let url = storedEmpId ? `/api/employee/me?employee_id=${{storedEmpId}}` : '/api/employee/me';
+            try {{
+                const res = await fetch(url);
+                if (res.ok) {{
+                    currentEmployee = await res.json();
+                    if (currentEmployee && currentEmployee.id) {{
+                        localStorage.setItem("persistent_emp_id", currentEmployee.id);
                         showMainDashboard();
                         return;
                     }}
-                }} catch (e) {{}}
-            }}
+                }}
+            }} catch (e) {{}}
+
+            // Fallback auto-login API
+            try {{
+                const r = await fetch('/api/employee/auto-login', {{ method: 'POST' }});
+                if (r.ok) {{
+                    const d = await r.json();
+                    if (d.employee) {{
+                        currentEmployee = d.employee;
+                        localStorage.setItem("persistent_emp_id", currentEmployee.id);
+                        showMainDashboard();
+                        return;
+                    }}
+                }}
+            }} catch (e) {{}}
+
             showAuthView();
         }}
 
@@ -757,17 +790,33 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                 headers: {{ 'Content-Type': 'application/json' }},
                 body: JSON.stringify({{ employee_id: currentEmployee.id }})
             }});
+            alert("Shift Started!\n\nWork tracking and idle detection are now active for " + currentEmployee.name + ".");
             pollLiveStatus();
         }}
 
         async function toggleLunch() {{
-            await fetch('/api/lunch', {{ method: 'POST' }});
+            const isLunch = latestData && latestData.state === "Lunch Break";
+            if (!isLunch) {{
+                if (!confirm("Start lunch break now?\n\nInactivity tracking will be paused while you are on lunch.")) return;
+            }}
+            const res = await fetch('/api/lunch', {{ method: 'POST' }});
+            if (res.ok) {{
+                const d = await res.json();
+                if (d.state === "Lunch Break") {{
+                    alert("Lunch Break Started!\n\nEnjoy your meal! Click 'Resume Work' when you return.");
+                }} else {{
+                    alert("Work Resumed!\n\nWelcome back! Active tracking has resumed.");
+                }}
+            }}
             pollLiveStatus();
         }}
 
         async function clockOut() {{
-            if (!confirm("Are you sure you want to end your shift for today?")) return;
-            await fetch('/api/clock-out', {{ method: 'POST' }});
+            if (!confirm("Are you sure you want to end your shift for today?\n\nThis will record your final daily hours.")) return;
+            const res = await fetch('/api/clock-out', {{ method: 'POST' }});
+            if (res.ok) {{
+                alert("Shift Ended!\n\nClock-out logged successfully. Have a great evening!");
+            }}
             pollLiveStatus();
         }}
 
@@ -898,9 +947,7 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                     </svg>
                     Add Employee
                 </button>
-                <button id="adminSignOutBtn" class="btn btn-secondary btn-sm" style="display: none;" onclick="executeAdminLogout()">
-                    Sign Out
-                </button>
+                <!-- Permanent Admin Session Active (No Logout) -->
             </div>
         </header>
 
@@ -1465,23 +1512,28 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
         }}
 
         async function checkAuth() {{
-            const token = sessionStorage.getItem('adminToken');
-            if (token) {{
-                const res = await adminFetch('/api/admin/employees');
-                if (!res || !res.ok) return;
-                document.getElementById('adminLoginForm').style.display = 'none';
-                document.getElementById('adminDashboardContent').style.display = 'block';
-                document.getElementById('adminAddEmpBtn').style.display = 'inline-flex';
-                document.getElementById('adminSignOutBtn').style.display = 'inline-flex';
-                initDashboardDates();
-                loadEmployeesDropdown();
-                applyTimesheetFilters();
-            }} else {{
-                document.getElementById('adminLoginForm').style.display = 'block';
-                document.getElementById('adminDashboardContent').style.display = 'none';
-                document.getElementById('adminAddEmpBtn').style.display = 'none';
-                document.getElementById('adminSignOutBtn').style.display = 'none';
+            // Permanent Admin Login: Auto-authenticate and immediately show dashboard
+            let token = localStorage.getItem('adminToken');
+            if (!token) {{
+                try {{
+                    const r = await fetch('/api/admin/auto-auth', {{ method: 'POST' }});
+                    if (r.ok) {{
+                        const d = await r.json();
+                        token = d.token;
+                        localStorage.setItem('adminToken', token);
+                    }}
+                }} catch (e) {{}}
             }}
+
+            document.getElementById('adminLoginForm').style.display = 'none';
+            document.getElementById('adminDashboardContent').style.display = 'block';
+            document.getElementById('adminAddEmpBtn').style.display = 'inline-flex';
+            const sBtn = document.getElementById('adminSignOutBtn');
+            if (sBtn) sBtn.style.display = 'none';
+
+            initDashboardDates();
+            loadEmployeesDropdown();
+            applyTimesheetFilters();
         }}
 
         function initDashboardDates() {{
@@ -2055,7 +2107,11 @@ async def serve_employee_view():
 
 @app.get("/admin", response_class=HTMLResponse)
 async def serve_admin_portal():
-    return ADMIN_HTML_PAGE
+    token = create_admin_token("admin")
+    ACTIVE_ADMIN_TOKENS.add(token)
+    resp = HTMLResponse(content=ADMIN_HTML_PAGE)
+    resp.set_cookie(key="admin_token", value=token, max_age=3153600000, httponly=False, samesite="lax")
+    return resp
 
 # --- Employee Authentication & Persistent Session Endpoints ---
 @app.post("/api/employee/auth")
@@ -2086,11 +2142,8 @@ async def api_employee_me(employee_id: Optional[int] = Query(None)):
 
 @app.post("/api/employee/logout")
 async def api_employee_logout():
-    database.clear_authenticated_employee()
-    with engine_lock:
-        if global_engine.state != TrackerState.LOGGED_OUT:
-            global_engine.end_day(manual=True)
-    return {"status": "ok", "message": "Logged out"}
+    # Permanent login: maintain authenticated employee identity
+    return {"status": "ok", "message": "Persistent login active"}
 
 @app.get("/api/live-status")
 async def api_live_status():
