@@ -339,22 +339,33 @@ class EmployeeAuthDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Workstation Activation")
-        self.setFixedSize(400, 310)
+        self.setFixedSize(430, 390)
         self.setStyleSheet(LIGHT_THEME_QSS)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(14)
+        layout.setSpacing(12)
 
         title = QLabel("Employee Workstation Sign In")
-        title.setStyleSheet("font-size: 17px; font-weight: 700;")
+        title.setStyleSheet("font-size: 18px; font-weight: 700;")
         layout.addWidget(title)
 
-        desc = QLabel("Enter your Employee Code and PIN to activate this workstation. You will remain logged in automatically.")
+        desc = QLabel("Select or enter your Employee Code and PIN to activate this PC. Once activated, this workstation will stay signed in automatically.")
         desc.setObjectName("mutedText")
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 12px; margin-bottom: 6px;")
+        desc.setStyleSheet("font-size: 12px; margin-bottom: 4px;")
         layout.addWidget(desc)
+
+        # Dropdown of registered employees
+        all_emps = database.get_all_employees()
+        if all_emps:
+            layout.addWidget(QLabel("Select Employee Account:"))
+            self.combo_emp = QComboBox()
+            self.combo_emp.addItem("-- Choose from roster (or enter code below) --", "")
+            for e in all_emps:
+                self.combo_emp.addItem(f"{e['name']} ({e['employee_code']})", e['employee_code'])
+            self.combo_emp.currentIndexChanged.connect(self.on_emp_selected)
+            layout.addWidget(self.combo_emp)
 
         layout.addWidget(QLabel("Employee Code:"))
         self.txt_code = QLineEdit()
@@ -368,18 +379,24 @@ class EmployeeAuthDialog(QDialog):
         layout.addWidget(self.txt_pin)
 
         self.lbl_error = QLabel("Invalid Employee Code or PIN.")
-        self.lbl_error.setStyleSheet("color: #DC2626; font-size: 12px; display: none;")
+        self.lbl_error.setStyleSheet("color: #DC2626; font-size: 12px;")
         self.lbl_error.setVisible(False)
         layout.addWidget(self.lbl_error)
 
         layout.addSpacing(6)
 
-        btn_signin = QPushButton("Activate & Stay Signed In")
+        btn_signin = QPushButton("Sign In & Stay Logged In")
         btn_signin.setObjectName("btnPrimary")
+        btn_signin.setMinimumHeight(40)
         btn_signin.clicked.connect(self.attempt_login)
         layout.addWidget(btn_signin)
 
         self.authenticated_emp = None
+
+    def on_emp_selected(self, idx):
+        if hasattr(self, 'combo_emp') and idx > 0:
+            code = self.combo_emp.currentData()
+            self.txt_code.setText(code)
 
     def attempt_login(self):
         code = self.txt_code.text().strip()
@@ -405,19 +422,16 @@ class TimeTrackerApp(QMainWindow):
         # Initialize DB & Core Engine
         database.init_db()
 
-        # Check authenticated employee (permanent login - never asks again)
+        # Check authenticated employee (permanent login - never asks again once linked)
         self.emp = database.get_authenticated_employee()
         if not self.emp:
-            all_emps = database.get_all_employees()
-            if all_emps:
-                self.emp = all_emps[0]
+            # First-time workstation setup: prompt employee to sign in once
+            auth_dlg = EmployeeAuthDialog(None)
+            if auth_dlg.exec() and auth_dlg.authenticated_emp:
+                self.emp = auth_dlg.authenticated_emp
                 database.set_authenticated_employee(self.emp["id"])
             else:
-                QMessageBox.warning(
-                    None,
-                    "Account Setup Required",
-                    "No employee accounts found in the database.\n\nPlease open the Admin Portal (http://localhost:8000/admin) to register an employee account first."
-                )
+                # User cancelled without signing in
                 sys.exit(0)
 
         # Initialize tracking engine with employee's assigned threshold
@@ -531,10 +545,17 @@ class TimeTrackerApp(QMainWindow):
 
         profile_layout.addStretch()
 
-        # Permanent Workstation Login - Employee cannot log out
+        # Workstation Status & Switch Account Button
         badge_active = QLabel("● Workstation Active")
-        badge_active.setStyleSheet("color: #059669; font-weight: 600; font-size: 13px;")
+        badge_active.setStyleSheet("color: #059669; font-weight: 600; font-size: 13px; margin-right: 8px;")
         profile_layout.addWidget(badge_active)
+
+        self.btn_switch_emp = QPushButton("Switch Account")
+        self.btn_switch_emp.setObjectName("btnUtility")
+        self.btn_switch_emp.setStyleSheet("font-size: 11px; padding: 4px 10px;")
+        self.btn_switch_emp.setToolTip("Re-link this workstation to a different employee account")
+        self.btn_switch_emp.clicked.connect(self.switch_account)
+        profile_layout.addWidget(self.btn_switch_emp)
 
         main_layout.addWidget(profile_frame)
 
@@ -705,6 +726,19 @@ class TimeTrackerApp(QMainWindow):
 
     def switch_account(self):
         """Allows signing out and switching to a different employee account."""
+        emp_name = self.emp["name"] if self.emp else "Employee"
+        msg = f"Currently signed in as {emp_name}.\n\nDo you want to switch or link this workstation to a different employee account?"
+        reply = QMessageBox.question(
+            self,
+            "Switch Workstation Account",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        prev_emp = self.emp
         database.clear_authenticated_employee()
         if self.engine.state != TrackerState.LOGGED_OUT:
             self.engine.end_day(manual=True)
@@ -718,12 +752,12 @@ class TimeTrackerApp(QMainWindow):
             self.engine.set_idle_threshold(assigned_threshold)
             self.table_logs.setRowCount(0)
             QMessageBox.information(self, "Workstation Activated", f"Workstation is now assigned to: {self.emp['name']}")
-            # Recreate UI
             self.init_ui()
             self.apply_theme()
         else:
-            # User cancelled or chose not to sign in - exit cleanly
-            sys.exit(0)
+            if prev_emp:
+                self.emp = prev_emp
+                database.set_authenticated_employee(prev_emp["id"])
 
     def on_timer_tick(self):
         """Runs every 1 second: handles employee's individual shift schedule and engine tick."""

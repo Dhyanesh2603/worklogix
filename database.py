@@ -221,14 +221,9 @@ def set_employee_pin(employee_id: int, new_pin: str) -> bool:
     return updated
 
 def get_authenticated_employee() -> Optional[Dict[str, Any]]:
-    """Retrieves locally persisted employee from settings table, auto-selecting default if not set."""
+    """Retrieves locally persisted employee from settings table."""
     emp_id_str = get_setting("auth_employee_id", "")
     if not emp_id_str or not emp_id_str.isdigit():
-        all_emps = get_all_employees()
-        if all_emps:
-            first_emp = all_emps[0]
-            set_authenticated_employee(first_emp["id"])
-            return first_emp
         return None
     emp_id = int(emp_id_str)
     if supabase_db.is_supabase_enabled():
