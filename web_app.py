@@ -989,7 +989,7 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                 <button class="tab-btn" onclick="switchAdminTab('daily', this)">Daily Reports</button>
                 <button class="tab-btn" onclick="switchAdminTab('monthly', this)">Monthly Timesheets</button>
                 <button class="tab-btn" onclick="switchAdminTab('shifts', this)">Employees & Shift Setup</button>
-                <button class="tab-btn" onclick="switchAdminTab('websites', this)">Website Monitoring Logs</button>
+                <button class="tab-btn" onclick="switchAdminTab('websites', this)">Browsers & Websites Visited</button>
             </div>
 
             <!-- TAB 1: ATTENDANCE & TIMESHEETS -->
@@ -1342,13 +1342,96 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- TAB 6: CONFIDENTIAL WEBSITE MONITORING LOGS -->
+            <!-- TAB 6: CONFIDENTIAL BROWSER & WEBSITE MONITORING LOGS -->
             <div id="tabContent_websites" class="tab-pane" style="display: none;">
-                <div class="card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <!-- Header Card -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                         <div>
-                            <h2 style="font-size: 17px; font-weight: 700;">Websites Visited Across All Workstations</h2>
-                            <p style="color: var(--text-muted); font-size: 13px; margin-top: 2px;">Confidential surveillance logs detailing every website domain and exact duration spent by employees.</p>
+                            <h2 style="font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                                </svg>
+                                Browsers & Websites Visited Across Workstations
+                            </h2>
+                            <p style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">Live surveillance audit of which browsers and websites employees visited and exact duration spent.</p>
+                        </div>
+                        <button class="btn btn-secondary" onclick="loadWebsitesData()">Refresh Surveillance Logs</button>
+                    </div>
+                </div>
+
+                <!-- 4 KPI Cards -->
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-title">Total Web Browsing Time</div>
+                        <div class="kpi-val" id="webKpiTotalBrowsing" style="color: var(--status-active-dot);">00h 00m</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-title">Primary Browser Used</div>
+                        <div class="kpi-val" id="webKpiPrimaryBrowser" style="font-size: 18px;">Google Chrome</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-title">Top Visited Website</div>
+                        <div class="kpi-val" id="webKpiTopWebsite" style="font-size: 18px; color: var(--accent-primary);">--</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-title">Unique Websites Visited</div>
+                        <div class="kpi-val" id="webKpiUniqueCount">0 Sites</div>
+                    </div>
+                </div>
+
+                <!-- Browser Breakdown Cards -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 12px;">Browser Usage Breakdown</h3>
+                    <div id="browserBreakdownGrid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                        <div style="color: var(--text-muted); font-size: 13px;">Loading browser metrics...</div>
+                    </div>
+                </div>
+
+                <!-- Search & Filter Controls -->
+                <div class="card" style="padding: 14px 18px; margin-bottom: 16px;">
+                    <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 220px;">
+                            <input type="text" id="webSearchInput" placeholder="Search by website domain (e.g. github, youtube) or browser..." style="width: 100%;" oninput="filterWebsitesTable()">
+                        </div>
+                        <div style="min-width: 180px;">
+                            <select id="webEmployeeFilter" style="width: 100%;" onchange="filterWebsitesTable()">
+                                <option value="">All Employees</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Websites Visited Table -->
+                <div class="card" style="margin-bottom: 18px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                        <h3 style="font-size: 15px; font-weight: 700;">Websites Visited by Employees</h3>
+                        <span id="webRecordCountBadge" style="font-size: 12px; color: var(--text-muted); font-weight: 600;">0 records</span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th>Date</th>
+                                <th>Browser Used</th>
+                                <th>Website / Domain</th>
+                                <th>Duration Spent</th>
+                            </tr>
+                        </thead>
+                        <tbody id="allWebsitesTableBody">
+                            <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">Loading website logs...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Applications & Software Usage Table -->
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                        <div>
+                            <h3 style="font-size: 15px; font-weight: 700;">All Applications & Software Activity</h3>
+                            <p style="color: var(--text-muted); font-size: 12px; margin-top: 2px;">Process-level duration records across browsers, development tools, and office apps.</p>
                         </div>
                     </div>
                     <table>
@@ -1356,12 +1439,13 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                             <tr>
                                 <th>Employee</th>
                                 <th>Date</th>
-                                <th>Website / Domain</th>
-                                <th>Total Time Spent</th>
+                                <th>Application / Browser</th>
+                                <th>Category</th>
+                                <th>Duration Spent</th>
                             </tr>
                         </thead>
-                        <tbody id="allWebsitesTableBody">
-                            <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">Loading website logs...</td></tr>
+                        <tbody id="allAppsTableBody">
+                            <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">Loading application logs...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1965,22 +2049,112 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
             }}
         }}
 
-        // --- TAB 6: WEBSITES VISITED ---
+        // --- TAB 6: BROWSERS & WEBSITES VISITED ---
+        let allWebsitesData = [];
+        let allAppsData = [];
+
         async function loadWebsitesData() {{
-            const res = await adminFetch('/api/admin/websites');
-            if (!res || !res.ok) return;
-            const webs = await res.json();
+            try {{
+                const res = await adminFetch('/api/admin/web-analytics');
+                if (!res || !res.ok) return;
+                const data = await res.json();
+
+                // 1. KPI Cards
+                const sum = data.summary || {{}};
+                document.getElementById('webKpiTotalBrowsing').innerText = formatDuration(sum.total_browsing_sec || 0);
+                document.getElementById('webKpiPrimaryBrowser').innerText = sum.primary_browser || 'Google Chrome';
+                document.getElementById('webKpiTopWebsite').innerText = sum.top_website || '--';
+                document.getElementById('webKpiUniqueCount').innerText = `${{sum.unique_websites_count || 0}} Sites`;
+
+                // 2. Browser Breakdown Grid
+                const browserGrid = document.getElementById('browserBreakdownGrid');
+                const breakdowns = data.browser_breakdown || [];
+                if (breakdowns.length === 0) {{
+                    browserGrid.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No browser usage recorded yet.</div>';
+                }} else {{
+                    browserGrid.innerHTML = breakdowns.map(b => `
+                        <div style="background: var(--bg-subtle); padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <strong style="font-size: 13px;">${{b.browser}}</strong>
+                                <span style="font-size: 11px; font-weight: 700; color: var(--status-active-dot);">${{b.percentage}}%</span>
+                            </div>
+                            <div style="font-size: 15px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text-primary); margin-bottom: 6px;">
+                                ${{formatDuration(b.duration_sec)}}
+                            </div>
+                            <div style="background: var(--border-subtle); height: 5px; border-radius: 3px; overflow: hidden;">
+                                <div style="background: var(--status-active-dot); width: ${{b.percentage}}%; height: 100%;"></div>
+                            </div>
+                        </div>
+                    `).join('');
+                }}
+
+                // 3. Employee Filter Options
+                allWebsitesData = data.all_websites || [];
+                allAppsData = data.all_apps || [];
+
+                const empFilter = document.getElementById('webEmployeeFilter');
+                const currentVal = empFilter.value;
+                const empSet = new Set(allWebsitesData.map(w => w.emp_name).concat(allAppsData.map(a => a.emp_name)));
+                empFilter.innerHTML = '<option value="">All Employees</option>' + 
+                    Array.from(empSet).filter(Boolean).map(e => `<option value="${{e}}">${{e}}</option>`).join('');
+                if (currentVal && empSet.has(currentVal)) empFilter.value = currentVal;
+
+                // 4. Render Table Rows
+                filterWebsitesTable();
+                renderAppsTable(allAppsData);
+            }} catch (e) {{
+                console.error("Error loading website surveillance data:", e);
+            }}
+        }}
+
+        function filterWebsitesTable() {{
+            const query = (document.getElementById('webSearchInput').value || '').toLowerCase().trim();
+            const emp = document.getElementById('webEmployeeFilter').value;
+
+            let filtered = allWebsitesData.filter(item => {{
+                const matchEmp = !emp || item.emp_name === emp;
+                const matchQuery = !query || 
+                    (item.domain && item.domain.toLowerCase().includes(query)) ||
+                    (item.browser && item.browser.toLowerCase().includes(query)) ||
+                    (item.emp_name && item.emp_name.toLowerCase().includes(query));
+                return matchEmp && matchQuery;
+            }});
+
+            document.getElementById('webRecordCountBadge').innerText = `${{filtered.length}} records`;
+
             const tbody = document.getElementById('allWebsitesTableBody');
-            if (!webs || webs.length === 0) {{
-                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">No website records logged yet.</td></tr>';
+            if (filtered.length === 0) {{
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">No matching website visits found.</td></tr>';
                 return;
             }}
-            tbody.innerHTML = webs.map(w => `
+
+            tbody.innerHTML = filtered.map(w => `
                 <tr>
-                    <td><strong>${{w.emp_name}}</strong></td>
+                    <td>
+                        <strong>${{w.emp_name}}</strong>
+                        <span style="display:block; font-size:11px; color:var(--text-muted);">${{w.employee_code || ''}}</span>
+                    </td>
                     <td>${{w.date}}</td>
-                    <td><span style="font-weight:600; color:var(--status-active-dot);">🌐 ${{w.domain}}</span></td>
-                    <td class="num-cell">${{formatDuration(w.duration_sec)}}</td>
+                    <td><span style="background: var(--bg-subtle); padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🌐 ${{w.browser || 'Google Chrome'}}</span></td>
+                    <td><span style="font-weight:600; color:var(--status-active-dot);">🔗 ${{w.domain}}</span></td>
+                    <td class="num-cell" style="font-weight: 700;">${{formatDuration(w.duration_sec)}}</td>
+                </tr>
+            `).join('');
+        }}
+
+        function renderAppsTable(apps) {{
+            const tbody = document.getElementById('allAppsTableBody');
+            if (!apps || apps.length === 0) {{
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">No application logs recorded.</td></tr>';
+                return;
+            }}
+            tbody.innerHTML = apps.map(a => `
+                <tr>
+                    <td><strong>${{a.emp_name}}</strong></td>
+                    <td>${{a.date}}</td>
+                    <td><strong>${{a.friendly_name}}</strong> <span style="font-size: 11px; color: var(--text-muted);">(${{a.app_name}})</span></td>
+                    <td><span style="background: var(--bg-subtle); padding: 2px 8px; border-radius: 4px; font-size: 11px;">${{a.category}}</span></td>
+                    <td class="num-cell" style="font-weight: 600;">${{formatDuration(a.duration_sec)}}</td>
                 </tr>
             `).join('');
         }}
@@ -2126,13 +2300,10 @@ async def api_employee_auth(req: EmployeeAuthRequest):
 async def api_employee_me(employee_id: Optional[int] = Query(None)):
     if employee_id:
         shift = database.get_employee_shift(employee_id)
-        conn = database.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, name, employee_code FROM employees WHERE id = ?", (employee_id,))
-        row = cursor.fetchone()
-        conn.close()
-        if row:
-            res = dict(row)
+        emps = database.get_all_employees()
+        found = next((e for e in emps if e["id"] == employee_id), None)
+        if found:
+            res = dict(found)
             res.update(shift)
             return res
     auth_emp = database.get_authenticated_employee()
@@ -2289,19 +2460,19 @@ async def api_get_monthly_report(
 
 @app.get("/api/admin/websites")
 async def api_get_admin_websites(token: str = Depends(verify_admin_token)):
-    conn = database.get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT w.id, e.name as emp_name, s.date, w.domain, w.duration_sec
-        FROM website_usage w
-        JOIN sessions s ON w.session_id = s.id
-        JOIN employees e ON s.employee_id = e.id
-        ORDER BY w.id DESC
-        LIMIT 150
-    """)
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return database.get_all_website_usage(200)
+
+@app.get("/api/admin/browser-usage")
+async def api_get_admin_browser_usage(token: str = Depends(verify_admin_token)):
+    return database.get_all_browser_usage(200)
+
+@app.get("/api/admin/web-analytics")
+async def api_get_admin_web_analytics(token: str = Depends(verify_admin_token)):
+    return database.get_browser_website_analytics()
+
+@app.get("/api/admin/apps-usage")
+async def api_get_admin_apps_usage(token: str = Depends(verify_admin_token)):
+    return database.get_all_apps_usage(200)
 
 # --- Excel & CSV Report Downloads ---
 @app.get("/api/export/excel")
