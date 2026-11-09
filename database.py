@@ -1112,3 +1112,18 @@ def get_browser_website_analytics() -> Dict[str, Any]:
         "all_browsers": browsers,
         "all_apps": apps
     }
+
+
+def update_all_employee_shifts(start_time: str, end_time: str) -> bool:
+    """Updates shift start and end times for all employees across the company."""
+    if supabase_db.is_supabase_enabled():
+        return supabase_db.update_all_employee_shifts(start_time, end_time)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE employees
+        SET shift_start = ?, shift_end = ?
+    """, (start_time, end_time))
+    conn.commit()
+    conn.close()
+    return True

@@ -86,6 +86,10 @@ class EmployeeShiftUpdateRequest(BaseModel):
     idle_threshold: int = 300
     new_pin: Optional[str] = None
 
+class BulkShiftUpdateRequest(BaseModel):
+    shift_start: str
+    shift_end: str
+
 class AddEmployeeRequest(BaseModel):
     name: str
     code: str
@@ -1120,6 +1124,13 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                                     Auto-Launch: <strong id="indivAutoStartText" style="color: var(--status-active-dot);">Enabled</strong>
                                 </p>
                             </div>
+                            <button class="btn btn-secondary btn-sm" onclick="openEditShiftModalFromProfile()" style="display: flex; align-items: center; gap: 6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                                Edit Shift Hours
+                            </button>
                         </div>
                     </div>
 
@@ -1297,6 +1308,31 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
 
             <!-- TAB 5: EMPLOYEE SHIFT & ACCESS SETUP -->
             <div id="tabContent_shifts" class="tab-pane" style="display: none;">
+                <!-- Company-Wide Default Shift Timing -->
+                <div class="card" style="margin-bottom: 20px; border-left: 4px solid var(--accent-primary);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+                        <div>
+                            <h3 style="font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                                Company-Wide Shift Hours (Quick Bulk Update)
+                            </h3>
+                            <p style="color: var(--text-muted); font-size: 13px; margin-top: 2px;">
+                                Apply standard working hours to all employees across the office at once.
+                            </p>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <label style="font-size: 13px; font-weight: 600;">Shift Start:</label>
+                            <input type="time" id="bulkShiftStart" value="09:30" style="width: 110px; font-weight: 600;">
+                            <label style="font-size: 13px; font-weight: 600;">Shift End:</label>
+                            <input type="time" id="bulkShiftEnd" value="18:00" style="width: 110px; font-weight: 600;">
+                            <button class="btn btn-primary btn-sm" onclick="applyBulkShiftTimings()">Apply to All Employees</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Add New Employee Card -->
                 <div class="card" style="margin-bottom: 20px;">
                     <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 12px;">Add New Employee to Workstation Roster</h3>
@@ -1795,6 +1831,7 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
             const res = await adminFetch(`/api/admin/employee-profile/${{empId}}`);
             if (!res || !res.ok) return;
             const data = await res.json();
+            currentProfileData = data;
             container.style.display = 'block';
 
             document.getElementById('indivName').innerText = data.employee.name;
@@ -1964,7 +2001,7 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                     </td>
                     <td>
                         <div style="display: flex; gap: 6px;">
-                            <button class="btn btn-primary btn-sm" onclick="saveIndividualShift(${{e.id}})">Save</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveIndividualShift(${{e.id}}, '${{e.name}}')">Save Shift</button>
                             <button class="btn btn-secondary btn-sm" style="color: #DC2626; border-color: #FECACA;" onclick="deleteEmployee(${{e.id}}, '${{e.name}}')">Delete</button>
                         </div>
                     </td>
@@ -2000,11 +2037,16 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
             }}
         }}
 
-        async function saveIndividualShift(empId) {{
+        async function saveIndividualShift(empId, empName) {{
             const start_time = document.getElementById(`shiftStart_${{empId}}`).value;
             const end_time = document.getElementById(`shiftEnd_${{empId}}`).value;
             const is_auto_start = document.getElementById(`shiftAuto_${{empId}}`).checked;
             const idle_threshold = parseInt(document.getElementById(`shiftThresh_${{empId}}`).value, 10);
+
+            if (!start_time || !end_time) {{
+                alert("Please enter both shift start and end times.");
+                return;
+            }}
 
             const res = await adminFetch(`/api/admin/employees/${{empId}}/shift`, {{
                 method: 'POST',
@@ -2012,11 +2054,69 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                 body: JSON.stringify({{ employee_id: empId, start_time, end_time, is_auto_start, idle_threshold }})
             }});
             if (res && res.ok) {{
-                alert("Employee settings updated successfully!");
+                alert(`Shift timings for ${{empName || 'Employee'}} updated to ${{start_time}} - ${{end_time}} successfully!`);
                 loadShiftsData();
             }} else {{
                 alert("Failed to update shift.");
             }}
+        }}
+
+        async function applyBulkShiftTimings() {{
+            const start_time = document.getElementById('bulkShiftStart').value;
+            const end_time = document.getElementById('bulkShiftEnd').value;
+            if (!start_time || !end_time) {{
+                alert("Please enter both shift start and end times.");
+                return;
+            }}
+            if (!confirm(`Apply standard shift hours (${{start_time}} to ${{end_time}}) to ALL employees across the company?`)) return;
+
+            const res = await adminFetch('/api/admin/shifts/bulk-update', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ shift_start: start_time, shift_end: end_time }})
+            }});
+            if (res && res.ok) {{
+                alert(`Company-wide shift hours updated to ${{start_time}} - ${{end_time}} for all employees!`);
+                loadShiftsData();
+            }} else {{
+                alert("Failed to update bulk shift hours.");
+            }}
+        }}
+
+        function openEditShiftModalFromProfile() {{
+            if (!currentProfileData || !currentProfileData.employee) return;
+            const emp = currentProfileData.employee;
+            const sStart = (emp.shift_start || "09:30").slice(0, 5);
+            const sEnd = (emp.shift_end || "18:00").slice(0, 5);
+            
+            const newStart = prompt(`Edit Shift Start Time (HH:MM) for ${{emp.name}}:`, sStart);
+            if (newStart === null) return;
+            const newEnd = prompt(`Edit Shift End Time (HH:MM) for ${{emp.name}}:`, sEnd);
+            if (newEnd === null) return;
+
+            if (!newStart.trim() || !newEnd.trim()) {{
+                alert("Shift hours cannot be empty.");
+                return;
+            }}
+
+            adminFetch(`/api/admin/employees/${{emp.id}}/shift`, {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{
+                    employee_id: emp.id,
+                    start_time: newStart.trim(),
+                    end_time: newEnd.trim(),
+                    is_auto_start: emp.is_auto_start !== false,
+                    idle_threshold: emp.idle_threshold || 300
+                }})
+            }}).then(res => {{
+                if (res && res.ok) {{
+                    alert(`Shift hours for ${{emp.name}} updated to ${{newStart.trim()}} - ${{newEnd.trim()}} successfully!`);
+                    loadEmployeeProfile(emp.id);
+                }} else {{
+                    alert("Failed to update shift hours.");
+                }}
+            }});
         }}
 
         async function addNewEmployee() {{
@@ -2412,6 +2512,11 @@ async def api_update_employee_shift(employee_id: int, req: EmployeeShiftUpdateRe
     if not success:
         raise HTTPException(status_code=404, detail="Employee not found")
     return {"status": "ok", "message": "Shift updated"}
+
+@app.post("/api/admin/shifts/bulk-update")
+async def api_bulk_update_shifts(req: BulkShiftUpdateRequest, token: str = Depends(verify_admin_token)):
+    database.update_all_employee_shifts(req.shift_start, req.shift_end)
+    return {"status": "ok", "message": "All employee shift timings updated"}
 
 @app.delete("/api/admin/employees/{employee_id}")
 async def api_delete_employee(employee_id: int, token: str = Depends(verify_admin_token)):

@@ -909,3 +909,17 @@ def get_browser_website_analytics() -> Dict[str, Any]:
         "all_browsers": browsers,
         "all_apps": apps
     }
+
+
+def update_all_employee_shifts(start_time: str, end_time: str) -> bool:
+    """Updates shift start and end times for all employees across the company."""
+    try:
+        client = get_supabase_client()
+        res = client.table("employees").update({
+            "shift_start": start_time,
+            "shift_end": end_time
+        }).neq("id", 0).execute()
+        return bool(res.data)
+    except Exception as e:
+        print("[Supabase Error] update_all_employee_shifts:", e)
+        return False
