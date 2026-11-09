@@ -593,10 +593,16 @@ class TimeTrackerApp(QMainWindow):
         lbl_act_title.setStyleSheet("font-size: 15px; font-weight: 700;")
         act_header_layout.addWidget(lbl_act_title)
 
+        act_header_layout.addStretch()
+
+        self.lbl_active_app = QLabel("")
+        self.lbl_active_app.setStyleSheet("font-size: 12px; font-weight: 600; color: #059669; padding-right: 12px;")
+        act_header_layout.addWidget(self.lbl_active_app)
+
         self.lbl_idle_indicator = QLabel("System Idle: 0s")
         self.lbl_idle_indicator.setObjectName("mutedText")
         self.lbl_idle_indicator.setStyleSheet("font-size: 12px;")
-        act_header_layout.addWidget(self.lbl_idle_indicator, alignment=Qt.AlignmentFlag.AlignRight)
+        act_header_layout.addWidget(self.lbl_idle_indicator)
         main_layout.addLayout(act_header_layout)
 
         self.table_logs = QTableWidget(0, 5)
@@ -880,14 +886,29 @@ class TimeTrackerApp(QMainWindow):
 
         idle = stats["idle_seconds"]
         thresh = self.engine.idle_threshold
+        active_app = stats.get("active_app", "")
+        active_browser = stats.get("active_browser")
+        active_domain = stats.get("active_domain")
+
         if stats["state"] == TrackerState.ACTIVE.value:
             self.lbl_idle_indicator.setText(f"System Idle: {idle}s / {thresh}s")
+            if active_domain:
+                b_name = active_browser or "Browser"
+                self.lbl_active_app.setText(f"Active: {b_name} • {active_domain}")
+            elif active_app and active_app not in ["Desktop/Idle", "System", "explorer.exe"]:
+                disp = tracker_core.get_app_display_info(active_app)
+                self.lbl_active_app.setText(f"Active: {disp['friendly_name']}")
+            else:
+                self.lbl_active_app.setText("")
         elif stats["state"] == TrackerState.INACTIVE.value:
             self.lbl_idle_indicator.setText(f"Inactivity: {idle}s away")
+            self.lbl_active_app.setText("")
         elif stats["state"] == TrackerState.LUNCH.value:
             self.lbl_idle_indicator.setText("Lunch break in progress")
+            self.lbl_active_app.setText("")
         else:
             self.lbl_idle_indicator.setText("System Idle: 0s")
+            self.lbl_active_app.setText("")
 
     def handle_interval_logged(self, log: dict):
         """Inserts completed interval row into the table."""

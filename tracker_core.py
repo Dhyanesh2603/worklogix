@@ -20,59 +20,191 @@ def attach_to_interactive_desktop():
     except Exception:
         pass
 
-BROWSER_PROCESSES = {
-    "chrome.exe", "msedge.exe", "brave.exe", "firefox.exe", "opera.exe", "vivaldi.exe"
+BROWSER_FRIENDLY_NAMES = {
+    "chrome.exe": "Google Chrome",
+    "msedge.exe": "Microsoft Edge",
+    "brave.exe": "Brave Browser",
+    "firefox.exe": "Mozilla Firefox",
+    "opera.exe": "Opera",
+    "opera_gx.exe": "Opera GX",
+    "vivaldi.exe": "Vivaldi",
+    "arc.exe": "Arc Browser",
+    "safari.exe": "Apple Safari",
+    "iexplore.exe": "Internet Explorer"
 }
 
+BROWSER_PROCESSES = set(BROWSER_FRIENDLY_NAMES.keys())
+
+APPLICATION_CATALOG = {
+    # Browsers
+    "chrome.exe": ("Google Chrome", "Web Browser"),
+    "msedge.exe": ("Microsoft Edge", "Web Browser"),
+    "brave.exe": ("Brave Browser", "Web Browser"),
+    "firefox.exe": ("Mozilla Firefox", "Web Browser"),
+    "opera.exe": ("Opera", "Web Browser"),
+    "opera_gx.exe": ("Opera GX", "Web Browser"),
+    "vivaldi.exe": ("Vivaldi", "Web Browser"),
+    "arc.exe": ("Arc Browser", "Web Browser"),
+    # Development
+    "code.exe": ("Visual Studio Code", "Development"),
+    "devenv.exe": ("Visual Studio", "Development"),
+    "pycharm64.exe": ("PyCharm", "Development"),
+    "idea64.exe": ("IntelliJ IDEA", "Development"),
+    "windowsterminal.exe": ("Windows Terminal", "Development"),
+    "powershell.exe": ("PowerShell", "Development"),
+    "cmd.exe": ("Command Prompt", "Development"),
+    "git-bash.exe": ("Git Bash", "Development"),
+    "dbeaver.exe": ("DBeaver", "Database"),
+    "postman.exe": ("Postman", "Development"),
+    # Productivity & Office
+    "excel.exe": ("Microsoft Excel", "Office"),
+    "winword.exe": ("Microsoft Word", "Office"),
+    "powerpnt.exe": ("Microsoft PowerPoint", "Office"),
+    "onenote.exe": ("Microsoft OneNote", "Office"),
+    "outlook.exe": ("Microsoft Outlook", "Office"),
+    "notion.exe": ("Notion", "Productivity"),
+    "slack.exe": ("Slack", "Communication"),
+    "teams.exe": ("Microsoft Teams", "Communication"),
+    "zoom.exe": ("Zoom", "Communication"),
+    "discord.exe": ("Discord", "Communication"),
+    "figma.exe": ("Figma", "Design"),
+    "canva.exe": ("Canva", "Design"),
+    "explorer.exe": ("Windows File Explorer", "System"),
+    "officetracker.exe": ("Office Work Tracker", "Productivity"),
+    "antigravity.exe": ("Antigravity IDE", "Development"),
+}
+
+def get_browser_friendly_name(proc_name: str) -> Optional[str]:
+    """Returns clean human-readable browser name, or None if not a recognized browser."""
+    return BROWSER_FRIENDLY_NAMES.get(proc_name.lower())
+
+def get_app_display_info(proc_name: str) -> Dict[str, str]:
+    """Returns friendly application name and category."""
+    lower = proc_name.lower()
+    if lower in APPLICATION_CATALOG:
+        friendly, cat = APPLICATION_CATALOG[lower]
+        return {"app": proc_name, "friendly_name": friendly, "category": cat}
+    import os
+    base = os.path.splitext(proc_name)[0]
+    return {"app": proc_name, "friendly_name": base.capitalize(), "category": "General Application"}
+
 def extract_website_domain(proc_name: str, window_title: str) -> Optional[str]:
-    """Extracts website domain or clean site name from active browser window."""
+    """
+    Extracts website domain or clean site name from active browser window.
+    Returns None if the application is not a recognized web browser.
+    """
     if proc_name.lower() not in BROWSER_PROCESSES:
         return None
 
-    # 1. Check window title for clean domain match (e.g., github.com, youtube.com)
-    cleaned = re.sub(
-        r'(\s+-\s+(Google Chrome|Microsoft Edge|Brave|Opera|Vivaldi)|\s+—\s+Mozilla Firefox)$',
-        '', window_title, flags=re.IGNORECASE
-    )
+    if not window_title or window_title.strip() == "":
+        return "web-browsing"
 
-    domain_match = re.search(r'\b([a-z0-9-]+\.(?:com|org|net|io|co|in|ai|app|dev|edu|gov|so))\b', cleaned, re.IGNORECASE)
+    # 1. Clean browser suffix from title
+    cleaned = re.sub(
+        r'(\s+-\s+(Google Chrome|Microsoft Edge|Brave|Opera GX|Opera|Vivaldi|Arc)|\s+—\s+Mozilla Firefox)$',
+        '', window_title, flags=re.IGNORECASE
+    ).strip()
+
+    title_lower = cleaned.lower()
+
+    # Browser internal/new tab pages
+    if title_lower in ["new tab", "untitled", "speed dial", "start page"]:
+        return "new-tab"
+    if title_lower.startswith("settings") or "chrome://settings" in title_lower or "edge://settings" in title_lower:
+        return "browser-settings"
+    if title_lower.startswith("downloads") or "chrome://downloads" in title_lower:
+        return "browser-downloads"
+    if title_lower.startswith("extensions") or "chrome://extensions" in title_lower:
+        return "browser-extensions"
+
+    # 2. Known popular web tools & services by keyword in title (priority over email addresses / titles)
+    known_services = [
+        # Google Services & Email
+        (r'\bgmail\b', 'mail.google.com'),
+        (r'\bgoogle docs\b', 'docs.google.com'),
+        (r'\bgoogle sheets\b', 'sheets.google.com'),
+        (r'\bgoogle slides\b', 'slides.google.com'),
+        (r'\bgoogle drive\b', 'drive.google.com'),
+        (r'\bgoogle meet\b|\bmeet\s*[-:]', 'meet.google.com'),
+        (r'\bgoogle calendar\b', 'calendar.google.com'),
+        (r'\bgoogle search\b|\bgoogle\b', 'google.com'),
+
+        # AI & Chatbots
+        (r'\bchatgpt\b', 'chatgpt.com'),
+        (r'\bclaude\b', 'claude.ai'),
+        (r'\bgemini\b', 'gemini.google.com'),
+        (r'\bcopilot\b', 'copilot.microsoft.com'),
+        (r'\bperplexity\b', 'perplexity.ai'),
+        (r'\bdeepseek\b', 'deepseek.com'),
+        (r'\bpoe\b', 'poe.com'),
+
+        # Developer & Technical
+        (r'\bgithub\b', 'github.com'),
+        (r'\bgitlab\b', 'gitlab.com'),
+        (r'\bbitbucket\b', 'bitbucket.org'),
+        (r'\bstack overflow\b|\bstackoverflow\b', 'stackoverflow.com'),
+        (r'\bleetcode\b', 'leetcode.com'),
+        (r'\bhackerrank\b', 'hackerrank.com'),
+        (r'\bgeeksforgeeks\b', 'geeksforgeeks.org'),
+        (r'\bw3schools\b', 'w3schools.com'),
+        (r'\bmdn\b|developer\.mozilla', 'developer.mozilla.org'),
+        (r'\bhugging\s*face\b', 'huggingface.co'),
+        (r'\bfigma\b', 'figma.com'),
+        (r'\bcanva\b', 'canva.com'),
+        (r'\bnotion\b', 'notion.so'),
+        (r'\btrello\b', 'trello.com'),
+        (r'\bjira\b|\batlassian\b', 'atlassian.net'),
+        (r'\basana\b', 'asana.com'),
+        (r'\blinear\b', 'linear.app'),
+        (r'\bclickup\b', 'clickup.com'),
+        (r'\bsupabase\b', 'supabase.com'),
+        (r'\bvercel\b', 'vercel.com'),
+        (r'\bfirebase\b', 'firebase.google.com'),
+        (r'\baws\b|amazon web services', 'aws.amazon.com'),
+        (r'\bazure\b', 'portal.azure.com'),
+
+        # Communication & Social
+        (r'\bwhatsapp\b', 'web.whatsapp.com'),
+        (r'\btelegram\b', 'web.telegram.org'),
+        (r'\bdiscord\b', 'discord.com'),
+        (r'\bslack\b', 'slack.com'),
+        (r'\bteams\b|microsoft teams', 'teams.microsoft.com'),
+        (r'\boutlook\b|office 365|microsoft 365', 'outlook.office.com'),
+        (r'\bzoom\b', 'zoom.us'),
+        (r'\blinkedin\b', 'linkedin.com'),
+        (r'\byoutube\b', 'youtube.com'),
+        (r'\breddit\b', 'reddit.com'),
+        (r'\bfacebook\b', 'facebook.com'),
+        (r'\binstagram\b', 'instagram.com'),
+        (r'\btwitter\b|\b\s*/\s*x\b', 'x.com'),
+
+        # Knowledge, Media & Shopping
+        (r'\bwikipedia\b', 'wikipedia.org'),
+        (r'\bmedium\b', 'medium.com'),
+        (r'\bnetflix\b', 'netflix.com'),
+        (r'\bspotify\b', 'spotify.com'),
+        (r'\bamazon\b', 'amazon.com'),
+        (r'\bflipkart\b', 'flipkart.com'),
+    ]
+
+    for pattern, dom in known_services:
+        if re.search(pattern, title_lower):
+            return dom
+
+    # 3. Check for explicit domain in title (excluding email addresses like user@domain.com)
+    domain_match = re.search(r'(?<!@)\b([a-z0-9-]+\.(?:com|org|net|io|co|in|ai|app|dev|edu|gov|so|me|xyz|tech|tv|info))\b', cleaned, re.IGNORECASE)
     if domain_match:
         return domain_match.group(1).lower()
 
-    # 2. Known popular web tools & services by keyword in title
-    title_lower = cleaned.lower()
-    known_services = {
-        "youtube": "youtube.com",
-        "gmail": "mail.google.com",
-        "google docs": "docs.google.com",
-        "google sheets": "sheets.google.com",
-        "google drive": "drive.google.com",
-        "github": "github.com",
-        "figma": "figma.com",
-        "notion": "notion.so",
-        "slack": "slack.com",
-        "linkedin": "linkedin.com",
-        "stackoverflow": "stackoverflow.com",
-        "trello": "trello.com",
-        "jira": "atlassian.net",
-        "chatgpt": "chatgpt.com",
-        "canva": "canva.com",
-        "zoom": "zoom.us",
-        "reddit": "reddit.com",
-        "twitter": "x.com",
-        "facebook": "facebook.com",
-        "instagram": "instagram.com"
-    }
-    for kw, dom in known_services.items():
-        if kw in title_lower:
-            return dom
-
-    # 3. Fallback: Parse trailing or leading site name (e.g., "Page Title - SiteName")
+    # 4. Fallback: Parse trailing or leading site name (e.g. "Page Title - SiteName" or "Page Title | SiteName")
     parts = re.split(r'\s+[-–|•:]\s+', cleaned)
     if len(parts) > 1:
-        candidate = (parts[-1].strip() or parts[0].strip()).lower()
-        if len(candidate) < 25 and not any(char in candidate for char in ['/', '\\', 'http']):
-            return f"{candidate}.com"
+        for candidate in [parts[-1].strip(), parts[0].strip()]:
+            c_low = candidate.lower()
+            if 2 <= len(c_low) <= 25 and not any(char in c_low for char in ['/', '\\', 'http', '@', '.']):
+                clean_candidate = re.sub(r'[^a-z0-9-]', '', c_low)
+                if len(clean_candidate) >= 3:
+                    return f"{clean_candidate}.com"
 
     return "web-browsing"
 
@@ -374,6 +506,7 @@ class TrackerEngine:
                 "total_lunch": int(self.total_lunch_sec),
                 "total_span": int(self.total_active_sec + self.total_inactive_sec + self.total_lunch_sec),
                 "active_app": self.current_app_name,
+                "active_browser": get_browser_friendly_name(self.current_app_name),
                 "window_title": self.current_window_title,
                 "active_domain": self.current_website_domain
             })
