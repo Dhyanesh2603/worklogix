@@ -713,3 +713,199 @@ def clear_all_mock_data():
         client.table("employees").delete().neq("id", 0).execute()
     except Exception as e:
         print("[Supabase Error] clear_all_mock_data:", e)
+
+
+def get_all_website_usage(limit: int = 250) -> List[Dict[str, Any]]:
+    """Retrieves all website visits across all workstations with employee and browser details."""
+    try:
+        import tracker_core
+        client = get_supabase_client()
+        web_res = client.table("website_usage").select("id, session_id, domain, duration_sec").order("id", desc=True).limit(limit).execute()
+        rows = web_res.data or []
+        if not rows:
+            return []
+
+        session_ids = list({r["session_id"] for r in rows if r.get("session_id")})
+        sess_res = client.table("sessions").select("id, employee_id, date, employees(name, employee_code)").in_("id", session_ids).execute()
+        sess_map = {}
+        for s in (sess_res.data or []):
+            emp = s.get("employees") or {}
+            sess_map[s["id"]] = {
+                "date": s.get("date", ""),
+                "emp_name": emp.get("name", "Employee"),
+                "employee_code": emp.get("employee_code", "---")
+            }
+
+        # Query browsers used in these sessions to associate with website visits
+        browser_processes = list(tracker_core.BROWSER_PROCESSES)
+        app_res = client.table("app_usage").select("session_id, app_name, duration_sec").in_("session_id", session_ids).in_("app_name", browser_processes).execute()
+        sess_browser_map = {}
+        for a in (app_res.data or []):
+            sid = a["session_id"]
+            friendly = tracker_core.get_browser_friendly_name(a["app_name"]) or "Web Browser"
+            # Keep browser with highest duration
+            if sid not in sess_browser_map or a.get("duration_sec", 0) > sess_browser_map[sid][1]:
+                sess_browser_map[sid] = (friendly, a.get("duration_sec", 0))
+
+        result = []
+        for r in rows:
+            sid = r.get("session_id")
+            s_info = sess_map.get(sid, {})
+            b_info = sess_browser_map.get(sid, ("Google Chrome", 0))
+            result.append({
+                "id": r["id"],
+                "session_id": sid,
+                "emp_name": s_info.get("emp_name", "Employee"),
+                "employee_code": s_info.get("employee_code", "---"),
+                "date": s_info.get("date", ""),
+                "domain": r.get("domain", "web-browsing"),
+                "browser": b_info[0],
+                "duration_sec": r.get("duration_sec", 0)
+            })
+        return result
+    except Exception as e:
+        print("[Supabase Error] get_all_website_usage:", e)
+        return []
+
+def get_all_browser_usage(limit: int = 250) -> List[Dict[str, Any]]:
+    """Retrieves dedicated browser usage logs across all workstations."""
+    try:
+        import tracker_core
+        client = get_supabase_client()
+        browser_processes = list(tracker_core.BROWSER_PROCESSES)
+        app_res = client.table("app_usage").select("id, session_id, app_name, duration_sec").in_("app_name", browser_processes).order("duration_sec", desc=True).limit(limit).execute()
+        rows = app_res.data or []
+        if not rows:
+            return []
+
+        session_ids = list({r["session_id"] for r in rows if r.get("session_id")})
+        sess_res = client.table("sessions").select("id, employee_id, date, employees(name, employee_code)").in_("id", session_ids).execute()
+        sess_map = {}
+        for s in (sess_res.data or []):
+            emp = s.get("employees") or {}
+            sess_map[s["id"]] = {
+                "date": s.get("date", ""),
+                "emp_name": emp.get("name", "Employee"),
+                "employee_code": emp.get("employee_code", "---")
+            }
+
+        result = []
+        for r in rows:
+            sid = r.get("session_id")
+            s_info = sess_map.get(sid, {})
+            friendly = tracker_core.get_browser_friendly_name(r["app_name"]) or "Web Browser"
+            result.append({
+                "id": r["id"],
+                "session_id": sid,
+                "emp_name": s_info.get("emp_name", "Employee"),
+                "employee_code": s_info.get("employee_code", "---"),
+                "date": s_info.get("date", ""),
+                "browser_name": friendly,
+                "process_name": r["app_name"],
+                "duration_sec": r.get("duration_sec", 0)
+            })
+        return result
+    except Exception as e:
+        print("[Supabase Error] get_all_browser_usage:", e)
+        return []
+
+def get_all_apps_usage(limit: int = 250) -> List[Dict[str, Any]]:
+    """Retrieves all application usage logs across workstations with categorization."""
+    try:
+        import tracker_core
+        client = get_supabase_client()
+        app_res = client.table("app_usage").select("id, session_id, app_name, duration_sec").order("duration_sec", desc=True).limit(limit).execute()
+        rows = app_res.data or []
+        if not rows:
+            return []
+
+        session_ids = list({r["session_id"] for r in rows if r.get("session_id")})
+        sess_res = client.table("sessions").select("id, employee_id, date, employees(name, employee_code)").in_("id", session_ids).execute()
+        sess_map = {}
+        for s in (sess_res.data or []):
+            emp = s.get("employees") or {}
+            sess_map[s["id"]] = {
+                "date": s.get("date", ""),
+                "emp_name": emp.get("name", "Employee"),
+                "employee_code": emp.get("employee_code", "---")
+            }
+
+        result = []
+        for r in rows:
+            sid = r.get("session_id")
+            s_info = sess_map.get(sid, {})
+            disp = tracker_core.get_app_display_info(r["app_name"])
+            result.append({
+                "id": r["id"],
+                "session_id": sid,
+                "emp_name": s_info.get("emp_name", "Employee"),
+                "employee_code": s_info.get("employee_code", "---"),
+                "date": s_info.get("date", ""),
+                "app_name": r["app_name"],
+                "friendly_name": disp["friendly_name"],
+                "category": disp["category"],
+                "duration_sec": r.get("duration_sec", 0)
+            })
+        return result
+    except Exception as e:
+        print("[Supabase Error] get_all_apps_usage:", e)
+        return []
+
+def get_browser_website_analytics() -> Dict[str, Any]:
+    """Generates comprehensive analytics for browsers and websites across all workstations."""
+    websites = get_all_website_usage(200)
+    browsers = get_all_browser_usage(200)
+    apps = get_all_apps_usage(200)
+
+    # Compute total browsing seconds
+    total_browsing_sec = sum(b.get("duration_sec", 0) for b in browsers)
+
+    # Browser share breakdown
+    browser_totals: Dict[str, int] = {}
+    for b in browsers:
+        name = b["browser_name"]
+        browser_totals[name] = browser_totals.get(name, 0) + b["duration_sec"]
+
+    browser_breakdown = []
+    for b_name, b_sec in sorted(browser_totals.items(), key=lambda x: x[1], reverse=True):
+        pct = round((b_sec / total_browsing_sec * 100), 1) if total_browsing_sec > 0 else 0.0
+        browser_breakdown.append({
+            "browser": b_name,
+            "duration_sec": b_sec,
+            "percentage": pct
+        })
+
+    # Website totals
+    web_totals: Dict[str, int] = {}
+    web_emps: Dict[str, set] = {}
+    for w in websites:
+        dom = w["domain"]
+        web_totals[dom] = web_totals.get(dom, 0) + w["duration_sec"]
+        if dom not in web_emps:
+            web_emps[dom] = set()
+        web_emps[dom].add(w["emp_name"])
+
+    top_websites = []
+    for dom, sec in sorted(web_totals.items(), key=lambda x: x[1], reverse=True)[:15]:
+        top_websites.append({
+            "domain": dom,
+            "duration_sec": sec,
+            "employees": list(web_emps.get(dom, []))
+        })
+
+    primary_browser = browser_breakdown[0]["browser"] if browser_breakdown else "Google Chrome"
+    top_site = top_websites[0]["domain"] if top_websites else "None"
+
+    return {
+        "summary": {
+            "total_browsing_sec": total_browsing_sec,
+            "primary_browser": primary_browser,
+            "top_website": top_site,
+            "unique_websites_count": len(web_totals)
+        },
+        "browser_breakdown": browser_breakdown,
+        "top_websites": top_websites,
+        "all_websites": websites,
+        "all_browsers": browsers,
+        "all_apps": apps
+    }

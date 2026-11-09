@@ -972,3 +972,148 @@ def get_monthly_website_usage(year: int, month: int) -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_all_website_usage(limit: int = 250) -> List[Dict[str, Any]]:
+    """Retrieves website surveillance logs across all workstations."""
+    if supabase_db.is_supabase_enabled():
+        return supabase_db.get_all_website_usage(limit)
+    import tracker_core
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT w.id, w.session_id, e.name as emp_name, e.employee_code, s.date, w.domain, w.duration_sec
+        FROM website_usage w
+        JOIN sessions s ON w.session_id = s.id
+        JOIN employees e ON s.employee_id = e.id
+        ORDER BY w.id DESC
+        LIMIT ?
+    """, (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+
+    for r in rows:
+        sid = r["session_id"]
+        cursor.execute("""
+            SELECT app_name, duration_sec FROM app_usage
+            WHERE session_id = ?
+            ORDER BY duration_sec DESC
+        """, (sid,))
+        apps = cursor.fetchall()
+        browser = "Google Chrome"
+        for a in apps:
+            friendly = tracker_core.get_browser_friendly_name(a["app_name"])
+            if friendly:
+                browser = friendly
+                break
+        r["browser"] = browser
+
+    conn.close()
+    return rows
+
+def get_all_browser_usage(limit: int = 250) -> List[Dict[str, Any]]:
+    """Retrieves dedicated browser usage logs across all workstations."""
+    if supabase_db.is_supabase_enabled():
+        return supabase_db.get_all_browser_usage(limit)
+    import tracker_core
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT a.id, a.session_id, e.name as emp_name, e.employee_code, s.date, a.app_name as process_name, a.duration_sec
+        FROM app_usage a
+        JOIN sessions s ON a.session_id = s.id
+        JOIN employees e ON s.employee_id = e.id
+        ORDER BY a.duration_sec DESC
+    """)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    browser_rows = []
+    for r in rows:
+        friendly = tracker_core.get_browser_friendly_name(r["process_name"])
+        if friendly:
+            r["browser_name"] = friendly
+            browser_rows.append(r)
+            if len(browser_rows) >= limit:
+                break
+    return browser_rows
+
+def get_all_apps_usage(limit: int = 250) -> List[Dict[str, Any]]:
+    """Retrieves all application usage logs across workstations."""
+    if supabase_db.is_supabase_enabled():
+        return supabase_db.get_all_apps_usage(limit)
+    import tracker_core
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT a.id, a.session_id, e.name as emp_name, e.employee_code, s.date, a.app_name, a.duration_sec
+        FROM app_usage a
+        JOIN sessions s ON a.session_id = s.id
+        JOIN employees e ON s.employee_id = e.id
+        ORDER BY a.duration_sec DESC
+        LIMIT ?
+    """, (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    for r in rows:
+        disp = tracker_core.get_app_display_info(r["app_name"])
+        r["friendly_name"] = disp["friendly_name"]
+        r["category"] = disp["category"]
+    return rows
+
+def get_browser_website_analytics() -> Dict[str, Any]:
+    """Generates comprehensive analytics for browsers and websites across all workstations."""
+    if supabase_db.is_supabase_enabled():
+        return supabase_db.get_browser_website_analytics()
+    websites = get_all_website_usage(200)
+    browsers = get_all_browser_usage(200)
+    apps = get_all_apps_usage(200)
+
+    total_browsing_sec = sum(b.get("duration_sec", 0) for b in browsers)
+    browser_totals: Dict[str, int] = {}
+    for b in browsers:
+        name = b["browser_name"]
+        browser_totals[name] = browser_totals.get(name, 0) + b["duration_sec"]
+
+    browser_breakdown = []
+    for b_name, b_sec in sorted(browser_totals.items(), key=lambda x: x[1], reverse=True):
+        pct = round((b_sec / total_browsing_sec * 100), 1) if total_browsing_sec > 0 else 0.0
+        browser_breakdown.append({
+            "browser": b_name,
+            "duration_sec": b_sec,
+            "percentage": pct
+        })
+
+    web_totals: Dict[str, int] = {}
+    web_emps: Dict[str, set] = {}
+    for w in websites:
+        dom = w["domain"]
+        web_totals[dom] = web_totals.get(dom, 0) + w["duration_sec"]
+        if dom not in web_emps:
+            web_emps[dom] = set()
+        web_emps[dom].add(w["emp_name"])
+
+    top_websites = []
+    for dom, sec in sorted(web_totals.items(), key=lambda x: x[1], reverse=True)[:15]:
+        top_websites.append({
+            "domain": dom,
+            "duration_sec": sec,
+            "employees": list(web_emps.get(dom, []))
+        })
+
+    primary_browser = browser_breakdown[0]["browser"] if browser_breakdown else "Google Chrome"
+    top_site = top_websites[0]["domain"] if top_websites else "None"
+
+    return {
+        "summary": {
+            "total_browsing_sec": total_browsing_sec,
+            "primary_browser": primary_browser,
+            "top_website": top_site,
+            "unique_websites_count": len(web_totals)
+        },
+        "browser_breakdown": browser_breakdown,
+        "top_websites": top_websites,
+        "all_websites": websites,
+        "all_browsers": browsers,
+        "all_apps": apps
+    }
