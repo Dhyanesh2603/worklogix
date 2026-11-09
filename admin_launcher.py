@@ -4,9 +4,12 @@ import time
 import socket
 import threading
 import webbrowser
+import traceback
+import urllib.request
+from datetime import datetime
 from typing import Optional
 
-# Ensure local directory is in Python path
+# Setup directories and logging
 if getattr(sys, 'frozen', False):
     base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
 else:
@@ -14,14 +17,31 @@ else:
 
 sys.path.append(base_dir)
 
+# Ensure persistent debug log in ~/.worklogix/admin_portal.log
+try:
+    log_dir = os.path.join(os.path.expanduser("~"), ".worklogix")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "admin_portal.log")
+    log_file = open(log_path, "a", encoding="utf-8")
+    sys.stdout = log_file
+    sys.stderr = log_file
+except Exception:
+    pass
+
+print(f"\n--- WorkLogix Admin Portal Session: {datetime.now()} ---")
+print(f"Base Directory: {base_dir}")
+print(f"Executable: {sys.executable}")
+
 # Load environment variables
 from dotenv import load_dotenv
 env_file = os.path.join(base_dir, ".env")
 if os.path.exists(env_file):
+    print(f"Loading environment from: {env_file}")
     load_dotenv(env_file)
 
 exe_env = os.path.join(os.path.dirname(sys.executable), ".env")
 if os.path.exists(exe_env):
+    print(f"Loading environment from: {exe_env}")
     load_dotenv(exe_env)
 
 # PySide6 GUI imports
@@ -62,13 +82,25 @@ def create_admin_icon() -> QIcon:
     painter.end()
     return QIcon(pixmap)
 
+def check_admin_endpoint(url: str) -> bool:
+    """Verifies that the /admin HTTP endpoint responds with 200 OK."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "WorkLogixAdminLauncher/1.0"})
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
 def find_available_port(preferred_port: int = 8000) -> int:
-    """Checks if preferred port is available; returns available port."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex(('127.0.0.1', preferred_port)) != 0:
+    """Checks if preferred port can be bound; if not, selects an available port."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(('127.0.0.1', preferred_port))
             return preferred_port
+    except Exception as e:
+        print(f"Port {preferred_port} bind check: {e}")
     
-    # Preferred port is occupied, find another free port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('127.0.0.1', 0))
         return s.getsockname()[1]
@@ -78,28 +110,48 @@ class ServerThread(threading.Thread):
         super().__init__(daemon=True)
         self.host = host
         self.port = port
+        self.error: Optional[str] = None
+        self.is_running = False
+
+        # Explicit uvicorn configuration with h11 and asyncio to avoid missing optional packages
         self.config = uvicorn.Config(
             app=app,
             host=host,
             port=port,
-            log_level="warning",
+            loop="asyncio",
+            http="h11",
+            ws="none",
+            lifespan="off",
+            log_level="info",
             access_log=False
         )
         self.server = uvicorn.Server(self.config)
 
     def run(self):
-        self.server.run()
+        try:
+            print(f"Starting uvicorn server on http://{self.host}:{self.port}...")
+            self.is_running = True
+            self.server.run()
+            self.is_running = False
+            print("Uvicorn server exited normally.")
+        except Exception as e:
+            self.is_running = False
+            self.error = str(e)
+            print(f"Fatal uvicorn server error: {e}")
+            traceback.print_exc()
 
     def stop(self):
         self.server.should_exit = True
 
 class AdminLauncherWindow(QMainWindow):
-    def __init__(self, host: str, port: int, server_thread: ServerThread):
+    def __init__(self, host: str, port: int, server_thread: Optional[ServerThread] = None):
         super().__init__()
         self.host = host
         self.port = port
         self.server_thread = server_thread
         self.admin_url = f"http://{host}:{port}/admin"
+        self.browser_opened = False
+        self.startup_retries = 0
 
         self.setWindowTitle("WorkLogix Admin Portal")
         self.setFixedSize(520, 390)
@@ -108,8 +160,10 @@ class AdminLauncherWindow(QMainWindow):
         self.init_ui()
         self.setup_tray()
 
-        # Automatically open default browser after a brief startup delay
-        QTimer.singleShot(1200, self.open_browser)
+        # Polling timer to verify server readiness before opening browser
+        self.poll_timer = QTimer(self)
+        self.poll_timer.timeout.connect(self.check_server_startup)
+        self.poll_timer.start(300)
 
     def init_ui(self):
         central = QWidget()
@@ -149,33 +203,34 @@ class AdminLauncherWindow(QMainWindow):
 
         # Status Pill Row
         row_status = QHBoxLayout()
-        lbl_badge = QLabel("  ONLINE  ")
-        lbl_badge.setStyleSheet("""
-            background-color: #ECFDF5;
-            color: #065F46;
+        self.lbl_badge = QLabel("  STARTING  ")
+        self.lbl_badge.setStyleSheet("""
+            background-color: #FEF3C7;
+            color: #92400E;
             font-size: 11px;
             font-weight: 700;
             padding: 4px 10px;
             border-radius: 12px;
-            border: 1px solid #A7F3D0;
+            border: 1px solid #FDE68A;
         """)
-        lbl_url = QLabel(self.admin_url)
-        lbl_url.setStyleSheet("font-size: 13px; font-weight: 600; color: #0F172A; font-family: 'Consolas', monospace;")
-        row_status.addWidget(lbl_badge)
-        row_status.addWidget(lbl_url)
+        self.lbl_url = QLabel(self.admin_url)
+        self.lbl_url.setStyleSheet("font-size: 13px; font-weight: 600; color: #0F172A; font-family: 'Consolas', monospace;")
+        row_status.addWidget(self.lbl_badge)
+        row_status.addWidget(self.lbl_url)
         row_status.addStretch()
         card_layout.addLayout(row_status)
 
-        lbl_desc = QLabel("The management service is active. Use your web browser to administer employee profiles, review shift logs, and export monthly payroll spreadsheets.")
-        lbl_desc.setWordWrap(True)
-        lbl_desc.setStyleSheet("font-size: 12px; color: #64748B; line-height: 1.4;")
-        card_layout.addWidget(lbl_desc)
+        self.lbl_desc = QLabel("Initializing admin management service...")
+        self.lbl_desc.setWordWrap(True)
+        self.lbl_desc.setStyleSheet("font-size: 12px; color: #64748B; line-height: 1.4;")
+        card_layout.addWidget(self.lbl_desc)
 
         layout.addWidget(card)
 
         # Primary Open Browser Action
         self.btn_open = QPushButton("Open Admin Dashboard in Browser")
         self.btn_open.setFixedHeight(42)
+        self.btn_open.setEnabled(False)
         self.btn_open.setStyleSheet("""
             QPushButton {
                 background-color: #0F172A;
@@ -187,6 +242,10 @@ class AdminLauncherWindow(QMainWindow):
             }
             QPushButton:hover {
                 background-color: #1E293B;
+            }
+            QPushButton:disabled {
+                background-color: #E2E8F0;
+                color: #94A3B8;
             }
         """)
         self.btn_open.clicked.connect(self.open_browser)
@@ -256,10 +315,51 @@ class AdminLauncherWindow(QMainWindow):
 
         layout.addLayout(btn_layout)
 
+    def check_server_startup(self):
+        """Polls local endpoint until server responds, then opens browser."""
+        self.startup_retries += 1
+        is_ready = check_admin_endpoint(self.admin_url)
+
+        if is_ready:
+            self.poll_timer.stop()
+            self.lbl_badge.setText("  ONLINE  ")
+            self.lbl_badge.setStyleSheet("""
+                background-color: #ECFDF5;
+                color: #065F46;
+                font-size: 11px;
+                font-weight: 700;
+                padding: 4px 10px;
+                border-radius: 12px;
+                border: 1px solid #A7F3D0;
+            """)
+            self.lbl_desc.setText("The management service is active. Use your browser to administer employee profiles, review shift logs, and export monthly payroll spreadsheets.")
+            self.btn_open.setEnabled(True)
+
+            if not self.browser_opened:
+                self.browser_opened = True
+                self.open_browser()
+        elif self.server_thread and self.server_thread.error:
+            self.poll_timer.stop()
+            self.lbl_badge.setText("  ERROR  ")
+            self.lbl_badge.setStyleSheet("""
+                background-color: #FEF2F2;
+                color: #991B1B;
+                font-size: 11px;
+                font-weight: 700;
+                padding: 4px 10px;
+                border-radius: 12px;
+                border: 1px solid #FECACA;
+            """)
+            self.lbl_desc.setText(f"Server error: {self.server_thread.error}")
+        elif self.startup_retries > 30: # 9 seconds timeout
+            self.poll_timer.stop()
+            self.lbl_badge.setText("  UNREACHABLE  ")
+            self.lbl_desc.setText("Server took too long to respond. Check log file for details.")
+
     def setup_tray(self):
         self.tray = QSystemTrayIcon(self)
         self.tray.setIcon(create_admin_icon())
-        self.tray.setToolTip("WorkLogix Admin Portal (Running)")
+        self.tray.setToolTip("WorkLogix Admin Portal")
 
         menu = QMenu()
         act_open = menu.addAction("Open Admin Dashboard")
@@ -305,18 +405,29 @@ class AdminLauncherWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.tray.hide()
-            self.server_thread.stop()
+            if self.server_thread:
+                self.server_thread.stop()
             event.accept()
         else:
             event.ignore()
 
 def main():
     app_qt = QApplication(sys.argv)
-    app_qt.setQuitOnLastWindowClosed(False)
-
+    
     host = "127.0.0.1"
+    
+    # 1. Check if WorkLogix admin is already running on port 8000
+    if check_admin_endpoint("http://127.0.0.1:8000/admin"):
+        print("Admin portal is already active on port 8000. Opening browser...")
+        webbrowser.open("http://127.0.0.1:8000/admin")
+        window = AdminLauncherWindow(host=host, port=8000, server_thread=None)
+        window.show()
+        sys.exit(app_qt.exec())
+
+    # 2. Find available port
     port = find_available_port(8000)
 
+    # 3. Start uvicorn server in background thread
     server_thread = ServerThread(host=host, port=port)
     server_thread.start()
 
