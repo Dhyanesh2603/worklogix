@@ -508,6 +508,14 @@ class TimeTrackerApp(QMainWindow):
 
         header_layout.addStretch()
 
+        # Sign Out Button
+        self.btn_sign_out_header = QPushButton("Sign Out")
+        self.btn_sign_out_header.setObjectName("btnUtility")
+        self.btn_sign_out_header.setStyleSheet("color: #DC2626; font-weight: 600;")
+        self.btn_sign_out_header.setToolTip("Sign out and unlink this workstation")
+        self.btn_sign_out_header.clicked.connect(self.action_sign_out)
+        header_layout.addWidget(self.btn_sign_out_header)
+
         # Theme Toggle Button
         self.btn_theme_toggle = QPushButton("Dark Mode")
         self.btn_theme_toggle.setObjectName("btnUtility")
@@ -557,8 +565,15 @@ class TimeTrackerApp(QMainWindow):
         self.btn_switch_emp.setObjectName("btnUtility")
         self.btn_switch_emp.setStyleSheet("font-size: 11px; padding: 4px 10px;")
         self.btn_switch_emp.setToolTip("Re-link this workstation to a different employee account")
-        self.btn_switch_emp.clicked.connect(self.switch_account)
+        self.btn_switch_emp.clicked.connect(self.action_sign_out)
         profile_layout.addWidget(self.btn_switch_emp)
+
+        self.btn_sign_out_card = QPushButton("Sign Out")
+        self.btn_sign_out_card.setObjectName("btnUtility")
+        self.btn_sign_out_card.setStyleSheet("font-size: 11px; padding: 4px 10px; color: #DC2626; font-weight: 600;")
+        self.btn_sign_out_card.setToolTip("Sign out from this workstation")
+        self.btn_sign_out_card.clicked.connect(self.action_sign_out)
+        profile_layout.addWidget(self.btn_sign_out_card)
 
         main_layout.addWidget(profile_frame)
 
@@ -676,6 +691,11 @@ class TimeTrackerApp(QMainWindow):
 
         tray_menu.addSeparator()
 
+        act_signout = tray_menu.addAction("Sign Out / Switch Account")
+        act_signout.triggered.connect(self.action_sign_out)
+
+        tray_menu.addSeparator()
+
         act_exit = tray_menu.addAction("Exit App")
         act_exit.triggered.connect(self.close)
 
@@ -730,25 +750,29 @@ class TimeTrackerApp(QMainWindow):
         else:
             event.accept()
 
-    def switch_account(self):
-        """Allows signing out and switching to a different employee account."""
+    def action_sign_out(self):
+        """Signs out of the current employee account, unlinks workstation, and shows sign-in dialog."""
         emp_name = self.emp["name"] if self.emp else "Employee"
-        msg = f"Currently signed in as {emp_name}.\n\nDo you want to switch or link this workstation to a different employee account?"
         reply = QMessageBox.question(
             self,
-            "Switch Workstation Account",
-            msg,
+            "Confirm Sign Out",
+            f"Are you sure you want to sign out from {emp_name}?\n\n"
+            "This will end any active work session and unlink this workstation.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        prev_emp = self.emp
-        database.clear_authenticated_employee()
+        # 1. Conclude running tracking session
         if self.engine.state != TrackerState.LOGGED_OUT:
             self.engine.end_day(manual=True)
 
+        # 2. Clear persisted credentials in DB
+        database.clear_authenticated_employee()
+        self.emp = None
+
+        # 3. Present Employee Sign In dialog
         dialog = EmployeeAuthDialog(self)
         if dialog.exec() and dialog.authenticated_emp:
             self.emp = dialog.authenticated_emp
@@ -757,13 +781,20 @@ class TimeTrackerApp(QMainWindow):
             assigned_threshold = self.emp.get("idle_threshold", 300)
             self.engine.set_idle_threshold(assigned_threshold)
             self.table_logs.setRowCount(0)
-            QMessageBox.information(self, "Workstation Activated", f"Workstation is now assigned to: {self.emp['name']}")
+            QMessageBox.information(self, "Signed In", f"Workstation is now assigned to: {self.emp['name']}")
             self.init_ui()
             self.apply_theme()
         else:
-            if prev_emp:
-                self.emp = prev_emp
-                database.set_authenticated_employee(prev_emp["id"])
+            # User closed dialog without signing in -> exit application cleanly
+            QMessageBox.information(
+                self,
+                "Signed Out",
+                "You have been signed out successfully.\n\nWorkstation unlinked. Application will now close."
+            )
+            QApplication.quit()
+
+    def switch_account(self):
+        self.action_sign_out()
 
     def on_timer_tick(self):
         """Runs every 1 second: handles employee's individual shift schedule and engine tick."""

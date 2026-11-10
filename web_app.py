@@ -471,7 +471,7 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                         <circle cx="8.5" cy="7" r="4"></circle>
                         <polyline points="17 11 19 13 23 9"></polyline>
                     </svg>
-                    <span>Switch Account</span>
+                    <span>Sign Out</span>
                 </button>
                 <button class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
                     <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -547,7 +547,7 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span style="color: var(--status-active-dot); font-weight: 600; font-size: 13px;">● Workstation Assigned</span>
-                        <button class="btn btn-secondary" onclick="switchEmployeeAccount()" style="padding: 4px 10px; font-size: 12px;">Switch Account</button>
+                        <button class="btn btn-secondary" onclick="switchEmployeeAccount()" style="padding: 4px 10px; font-size: 12px; color: #DC2626; font-weight: 600;">Sign Out</button>
                     </div>
                 </div>
             </div>
@@ -748,7 +748,7 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
 
         async function switchEmployeeAccount() {{
             const empName = currentEmployee ? currentEmployee.name : "Employee";
-            if (!confirm(`Switch Workstation Account?\n\nCurrently signed in as ${{empName}}.\nDo you want to switch or link this portal to a different employee account?`)) {{
+            if (!confirm(`Confirm Sign Out\n\nAre you sure you want to sign out from ${{empName}}?\nThis will end any running work session and return to the sign in screen.`)) {{
                 return;
             }}
             try {{
