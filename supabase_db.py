@@ -405,19 +405,33 @@ def get_filtered_sessions(
         result = []
         for s in sessions:
             emp = s.get("employees") or {}
+            s_start = emp.get("shift_start", "09:30")
+            s_end = emp.get("shift_end", "18:00")
+            act = s.get("total_active_sec", 0)
+            try:
+                s_parts = [int(p) for p in s_start.split(":")]
+                e_parts = [int(p) for p in s_end.split(":")]
+                s_min = s_parts[0] * 60 + s_parts[1]
+                e_min = e_parts[0] * 60 + e_parts[1]
+                sched_sec = ((24 * 60 - s_min) + e_min) * 60 if e_min < s_min else (e_min - s_min) * 60
+                ot_sec = max(0, act - sched_sec)
+            except Exception:
+                ot_sec = 0
+
             result.append({
                 "id": s["id"],
                 "employee_id": s["employee_id"],
                 "employee_name": emp.get("name", "Unknown"),
                 "employee_code": emp.get("employee_code", "---"),
-                "shift_start": emp.get("shift_start", "09:30"),
-                "shift_end": emp.get("shift_end", "18:00"),
+                "shift_start": s_start,
+                "shift_end": s_end,
                 "date": s["date"],
                 "login_time": s["login_time"],
                 "logout_time": s.get("logout_time"),
-                "total_active_sec": s.get("total_active_sec", 0),
+                "total_active_sec": act,
                 "total_inactive_sec": s.get("total_inactive_sec", 0),
                 "total_lunch_sec": s.get("total_lunch_sec", 0),
+                "overtime_sec": ot_sec,
                 "status": s["status"]
             })
         return result

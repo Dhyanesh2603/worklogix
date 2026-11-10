@@ -470,6 +470,9 @@ class TimeTrackerApp(QMainWindow):
         self.card_active["val"].setStyleSheet(f"font-size: 24px; font-weight: 700; color: {self.metric_active_color}; font-family: 'JetBrains Mono', monospace;")
         self.card_inactive["val"].setStyleSheet(f"font-size: 24px; font-weight: 700; color: {self.metric_inactive_color}; font-family: 'JetBrains Mono', monospace;")
         self.card_lunch["val"].setStyleSheet(f"font-size: 24px; font-weight: 700; color: {self.metric_lunch_color}; font-family: 'JetBrains Mono', monospace;")
+        if hasattr(self, 'card_overtime') and self.card_overtime:
+            ot_col = "#7C3AED" if self.current_theme == "light" else "#A78BFA"
+            self.card_overtime["val"].setStyleSheet(f"font-size: 24px; font-weight: 700; color: {ot_col}; font-family: 'JetBrains Mono', monospace;")
 
         # Set native window palette background so Windows never paints white space on resize
         bg_col = QColor("#F8FAFC" if self.current_theme == "light" else "#0B0F17")
@@ -567,11 +570,14 @@ class TimeTrackerApp(QMainWindow):
         self.card_active = self.create_metric_card("Active Work Time", "00h 00m 00s")
         self.card_inactive = self.create_metric_card("Inactivity / Away", "00h 00m 00s")
         self.card_lunch = self.create_metric_card("Lunch Break", "00h 00m 00s")
+        self.card_overtime = self.create_metric_card("Overtime", "00h 00m 00s")
+        self.card_overtime["val"].setStyleSheet("font-size: 24px; font-weight: 700; color: #7C3AED; font-family: 'JetBrains Mono', monospace;")
 
         metrics_layout.addWidget(self.card_start["frame"])
         metrics_layout.addWidget(self.card_active["frame"])
         metrics_layout.addWidget(self.card_inactive["frame"])
         metrics_layout.addWidget(self.card_lunch["frame"])
+        metrics_layout.addWidget(self.card_overtime["frame"])
         main_layout.addLayout(metrics_layout)
 
         # 4. Action Controls Bar (Start, Lunch, End, Minimize)
@@ -857,6 +863,9 @@ class TimeTrackerApp(QMainWindow):
             total_active = self.card_active['val'].text()
             total_idle = self.card_inactive['val'].text()
             total_lunch = self.card_lunch['val'].text()
+            total_overtime = self.card_overtime['val'].text() if hasattr(self, 'card_overtime') else "00h 00m 00s"
+            if hasattr(self, 'card_overtime'):
+                self.card_overtime['val'].setText("00h 00m 00s")
 
             QMessageBox.information(
                 self,
@@ -864,7 +873,8 @@ class TimeTrackerApp(QMainWindow):
                 f"Clock-out logged successfully at {now_str}!\n\n"
                 f"• Total Active Work:  {total_active}\n"
                 f"• Total Inactivity:   {total_idle}\n"
-                f"• Total Lunch Break:  {total_lunch}\n\n"
+                f"• Total Lunch Break:  {total_lunch}\n"
+                f"• Total Overtime:     {total_overtime}\n\n"
                 "Your daily work session has concluded."
             )
 
@@ -917,6 +927,8 @@ class TimeTrackerApp(QMainWindow):
         self.card_active["val"].setText(format_sec(stats["total_active"]))
         self.card_inactive["val"].setText(format_sec(stats["total_inactive"]))
         self.card_lunch["val"].setText(format_sec(stats["total_lunch"]))
+        if hasattr(self, 'card_overtime'):
+            self.card_overtime["val"].setText(format_sec(stats.get("total_overtime", 0)))
 
         idle = stats["idle_seconds"]
         thresh = self.engine.idle_threshold

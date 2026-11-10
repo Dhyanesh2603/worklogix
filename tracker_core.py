@@ -260,6 +260,26 @@ class TrackerEngine:
         self.total_active_sec = 0
         self.total_inactive_sec = 0
         self.total_lunch_sec = 0
+        self.total_overtime_sec = 0
+
+        # Calculate scheduled shift duration in seconds
+        try:
+            cfg = database.get_employee_shift(employee_id)
+            if cfg and "shift_start" in cfg and "shift_end" in cfg:
+                s_parts = [int(p) for p in cfg["shift_start"].split(":")]
+                e_parts = [int(p) for p in cfg["shift_end"].split(":")]
+                s_min = s_parts[0] * 60 + s_parts[1]
+                e_min = e_parts[0] * 60 + e_parts[1]
+                if e_min < s_min:
+                    self.scheduled_shift_sec = ((24 * 60 - s_min) + e_min) * 60
+                else:
+                    self.scheduled_shift_sec = (e_min - s_min) * 60
+            else:
+                self.scheduled_shift_sec = 8 * 3600
+        except Exception:
+            self.scheduled_shift_sec = 8 * 3600
+        self.total_overtime_sec = 0
+        self.scheduled_shift_sec = 0
 
         # Current foreground app & website info
         self.current_app_name: str = "System"
@@ -386,6 +406,8 @@ class TrackerEngine:
         self.total_active_sec = 0
         self.total_inactive_sec = 0
         self.total_lunch_sec = 0
+        self.total_overtime_sec = 0
+        self.scheduled_shift_sec = 0
         self.current_interval_type = None
         self.current_interval_start = None
 
@@ -433,6 +455,13 @@ class TrackerEngine:
 
         idle_sec = get_idle_seconds()
         now = datetime.now()
+
+        # Prolonged inactivity exit: if idle for >= 20 minutes (1200 seconds) while in active or inactive state,
+        # automatically clock out and finalize the work session.
+        if idle_sec >= 1200:
+            if self.state in [TrackerState.ACTIVE, TrackerState.INACTIVE]:
+                self.end_day(manual=False)
+                return
 
         if self.state == TrackerState.ACTIVE:
             # Detect currently active application & window
@@ -496,6 +525,12 @@ class TrackerEngine:
         elif self.state == TrackerState.LUNCH:
             self.total_lunch_sec += 1
 
+        # Calculate overtime if active time exceeds scheduled shift hours
+        if self.scheduled_shift_sec > 0 and self.total_active_sec > self.scheduled_shift_sec:
+            self.total_overtime_sec = int(self.total_active_sec - self.scheduled_shift_sec)
+        else:
+            self.total_overtime_sec = 0
+
         # Emit tick stats to UI
         if self.on_tick:
             self.on_tick({
@@ -504,6 +539,7 @@ class TrackerEngine:
                 "total_active": int(self.total_active_sec),
                 "total_inactive": int(self.total_inactive_sec),
                 "total_lunch": int(self.total_lunch_sec),
+                "total_overtime": int(self.total_overtime_sec),
                 "total_span": int(self.total_active_sec + self.total_inactive_sec + self.total_lunch_sec),
                 "active_app": self.current_app_name,
                 "active_browser": get_browser_friendly_name(self.current_app_name),
@@ -541,12 +577,12 @@ class TrackerEngine:
                     if self.manual_clock_out_date != today_date:
                         self.start_day(emp_id, is_auto=True)
             else:
-                # Outside shift window: Auto-end ONLY IF the current session was started
-                # while within shift hours (i.e. shift reached its scheduled conclusion).
-                # If the employee started manually outside shift hours (overtime/testing), do NOT auto-end!
-                if self.state in [TrackerState.ACTIVE, TrackerState.INACTIVE]:
-                    if self.is_session_started_in_shift:
-                        self.end_day(manual=False)
+                # Outside shift window: Do NOT auto-end!
+                # Employees can work into overtime as long as needed.
+                # The session will only end if:
+                # 1. They manually click End Shift / Clock Out or quit the app.
+                # 2. Prolonged inactivity of 20 minutes (1200 seconds) is reached.
+                pass
         except Exception as e:
             pass
 

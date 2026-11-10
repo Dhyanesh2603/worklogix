@@ -691,7 +691,21 @@ def get_filtered_sessions(
     cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    res = []
+    for row in rows:
+        d = dict(row)
+        try:
+            s_parts = [int(p) for p in (d.get("shift_start") or "09:30").split(":")]
+            e_parts = [int(p) for p in (d.get("shift_end") or "18:00").split(":")]
+            s_min = s_parts[0] * 60 + s_parts[1]
+            e_min = e_parts[0] * 60 + e_parts[1]
+            sched_sec = ((24 * 60 - s_min) + e_min) * 60 if e_min < s_min else (e_min - s_min) * 60
+            act = d.get("total_active_sec") or 0
+            d["overtime_sec"] = max(0, act - sched_sec)
+        except Exception:
+            d["overtime_sec"] = 0
+        res.append(d)
+    return res
 
 def get_employee_profile(employee_id: int) -> Dict[str, Any]:
     """Retrieves full profile, performance KPIs, and recent records for one employee."""
@@ -831,6 +845,16 @@ def get_daily_report(date_str: str) -> Dict[str, Any]:
         item = dict(r)
         item["top_website"] = top_web
         item["top_app"] = top_app
+        try:
+            s_parts = [int(p) for p in (r.get("shift_start") or "09:30").split(":")]
+            e_parts = [int(p) for p in (r.get("shift_end") or "18:00").split(":")]
+            s_min = s_parts[0] * 60 + s_parts[1]
+            e_min = e_parts[0] * 60 + e_parts[1]
+            sched_sec = ((24 * 60 - s_min) + e_min) * 60 if e_min < s_min else (e_min - s_min) * 60
+            act = r.get("total_active_sec") or 0
+            item["overtime_sec"] = max(0, act - sched_sec)
+        except Exception:
+            item["overtime_sec"] = 0
         employees_data.append(item)
 
     conn.close()

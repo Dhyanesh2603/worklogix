@@ -34,6 +34,7 @@ latest_stats = {
     "total_active": 0,
     "total_inactive": 0,
     "total_lunch": 0,
+    "total_overtime": 0,
     "total_span": 0,
     "active_app": "Offline",
     "window_title": "Offline",
@@ -569,6 +570,10 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                     <div class="kpi-title">Lunch Break</div>
                     <div class="kpi-val" id="metricLunchTime" style="color: var(--text-secondary);">00h 00m 00s</div>
                 </div>
+                <div class="kpi-card">
+                    <div class="kpi-title">Overtime</div>
+                    <div class="kpi-val" id="metricOvertime" style="color: #8B5CF6;">00h 00m 00s</div>
+                </div>
             </div>
 
             <!-- Action Controls -->
@@ -805,6 +810,7 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                 document.getElementById('metricActiveTime').innerText = formatDuration(data.total_active || 0);
                 document.getElementById('metricInactiveTime').innerText = formatDuration(data.total_inactive || 0);
                 document.getElementById('metricLunchTime').innerText = formatDuration(data.total_lunch || 0);
+                document.getElementById('metricOvertime').innerText = formatDuration(data.total_overtime || 0);
 
                 if (data.state !== "Logged Out") {{
                     document.getElementById('idleLiveNotice').innerText = `System Idle: ${{data.idle_seconds}}s`;
@@ -1130,12 +1136,13 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                                 <th>Active Work</th>
                                 <th>Inactive Time</th>
                                 <th>Lunch</th>
+                                <th>Overtime</th>
                                 <th>Status</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody id="timesheetsTableBody">
-                            <tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 24px;">Loading records...</td></tr>
+                            <tr><td colspan="12" style="text-align: center; color: var(--text-muted); padding: 24px;">Loading records...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1284,13 +1291,14 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                                 <th>Logout Time</th>
                                 <th>Active Work</th>
                                 <th>Inactive Time</th>
+                                <th>Overtime</th>
                                 <th>Top Website</th>
                                 <th>Top Application</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
                         <tbody id="dailyReportTableBody">
-                            <tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 24px;">No employee records found for this date.</td></tr>
+                            <tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 24px;">No employee records found for this date.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1808,7 +1816,7 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
 
             const tbody = document.getElementById('timesheetsTableBody');
             if (sessions.length === 0) {{
-                tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 24px;">No matching timesheet records found.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; color: var(--text-muted); padding: 24px;">No matching timesheet records found.</td></tr>';
                 return;
             }}
 
@@ -1824,6 +1832,7 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                     <td class="num-cell" style="font-weight:600; color:var(--status-active-dot);">${{formatDuration(s.total_active_sec || 0)}}</td>
                     <td class="num-cell" style="font-weight:600; color:var(--status-inactive-dot);">${{formatDuration(s.total_inactive_sec || 0)}}</td>
                     <td class="num-cell">${{formatDuration(s.total_lunch_sec || 0)}}</td>
+                    <td class="num-cell" style="font-weight:600; color:#8B5CF6;">${{formatDuration(s.overtime_sec || 0)}}</td>
                     <td><span class="status-badge ${{statusClass}}"><span class="status-dot"></span>${{s.status}}</span></td>
                     <td>
                         <button class="btn btn-secondary btn-sm" onclick="viewEmployeeProfileDirectly(${{s.employee_id}})">View Profile</button>
@@ -1956,7 +1965,7 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
 
             const tbody = document.getElementById('dailyReportTableBody');
             if (data.records.length === 0) {{
-                tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 24px;">No employee records found for this date.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 24px;">No employee records found for this date.</td></tr>';
                 return;
             }}
 
@@ -1969,6 +1978,7 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                     <td class="num-cell">${{r.logout_time || '<span style="color:var(--text-muted);">In Progress</span>'}}</td>
                     <td class="num-cell" style="font-weight:600; color:var(--status-active-dot);">${{formatDuration(r.total_active_sec || 0)}}</td>
                     <td class="num-cell" style="font-weight:600; color:var(--status-inactive-dot);">${{formatDuration(r.total_inactive_sec || 0)}}</td>
+                    <td class="num-cell" style="font-weight:600; color:#8B5CF6;">${{formatDuration(r.overtime_sec || 0)}}</td>
                     <td><span style="font-weight:600; color:var(--status-active-dot);">🌐 ${{r.top_website}}</span></td>
                     <td><strong>${{r.top_app}}</strong></td>
                     <td><span class="status-badge ${{r.status === 'COMPLETED' ? 'status-active' : 'status-inactive'}}">${{r.status}}</span></td>
@@ -2499,6 +2509,7 @@ async def api_live_status():
             "total_active": global_engine.total_active_sec if is_active else 0,
             "total_inactive": global_engine.total_inactive_sec if is_active else 0,
             "total_lunch": global_engine.total_lunch_sec if is_active else 0,
+            "total_overtime": global_engine.total_overtime_sec if is_active else 0,
             "intervals": intervals,
             "app_usage": app_usage,
             "website_usage": web_usage,
