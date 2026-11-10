@@ -464,6 +464,14 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
             </div>
 
             <div style="display: flex; align-items: center; gap: 12px;">
+                <button id="btnHeaderSwitch" class="btn btn-secondary" onclick="switchEmployeeAccount()" style="display: none; padding: 6px 12px; font-size: 13px; align-items: center; gap: 6px;" title="Switch Employee Account">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="8.5" cy="7" r="4"></circle>
+                        <polyline points="17 11 19 13 23 9"></polyline>
+                    </svg>
+                    <span>Switch Account</span>
+                </button>
                 <button class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
                     <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="5"></circle>
@@ -496,11 +504,17 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                 </svg>
             </div>
             <h2 style="font-size: 18px; font-weight: 700; margin-bottom: 6px;">Workstation Sign In</h2>
-            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
-                Enter your Employee Code and PIN once to activate this workstation. You will remain signed in automatically.
+            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 18px;">
+                Select your employee profile from the list below, or enter your code &amp; PIN to sign in.
             </p>
             <div id="authErrorMsg" style="background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 14px; display: none;">
                 Invalid Employee Code or PIN.
+            </div>
+            <div style="text-align: left; margin-bottom: 14px;">
+                <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">Select Employee Account</label>
+                <select id="authRosterSelect" onchange="onSelectRosterEmp(this)" style="width: 100%;">
+                    <option value="">-- Choose from roster (or enter code below) --</option>
+                </select>
             </div>
             <div style="text-align: left; margin-bottom: 14px;">
                 <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">Employee Code</label>
@@ -530,7 +544,10 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                             Assigned Shift: 09:30 to 18:00 (Auto-Monitor Active)
                         </p>
                     </div>
-                    <span style="color: var(--status-active-dot); font-weight: 600; font-size: 13px;">● Workstation Assigned</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="color: var(--status-active-dot); font-weight: 600; font-size: 13px;">● Workstation Assigned</span>
+                        <button class="btn btn-secondary" onclick="switchEmployeeAccount()" style="padding: 4px 10px; font-size: 12px;">Switch Account</button>
+                    </div>
                 </div>
             </div>
 
@@ -622,10 +639,42 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
             return `${{String(h).padStart(2,'0')}}h ${{String(m).padStart(2,'0')}}m ${{String(s).padStart(2,'0')}}s`;
         }}
 
-        let currentEmployee = null;
+                let currentEmployee = null;
+        let latestData = null;
+
+        async function loadEmployeeRoster() {{
+            try {{
+                const res = await fetch('/api/employee/roster');
+                if (res.ok) {{
+                    const emps = await res.json();
+                    const sel = document.getElementById('authRosterSelect');
+                    if (sel) {{
+                        sel.innerHTML = '<option value="">-- Choose from roster (or enter code below) --</option>';
+                        emps.forEach(e => {{
+                            const opt = document.createElement('option');
+                            opt.value = e.employee_code;
+                            opt.innerText = `${{e.name}} (${{e.employee_code}})`;
+                            sel.appendChild(opt);
+                        }});
+                    }}
+                }}
+            }} catch (err) {{}}
+        }}
+
+        function onSelectRosterEmp(sel) {{
+            if (sel && sel.value) {{
+                document.getElementById('authCodeInput').value = sel.value;
+                document.getElementById('authPinInput').focus();
+            }}
+        }}
 
         async function initEmployeeSession() {{
-            // Always logged in: fetch persisted or default employee
+            if (localStorage.getItem("portal_account_switched") === "true") {{
+                showAuthView();
+                loadEmployeeRoster();
+                return;
+            }}
+
             let storedEmpId = localStorage.getItem("persistent_emp_id");
             let url = storedEmpId ? `/api/employee/me?employee_id=${{storedEmpId}}` : '/api/employee/me';
             try {{
@@ -640,31 +689,22 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                 }}
             }} catch (e) {{}}
 
-            // Fallback auto-login API
-            try {{
-                const r = await fetch('/api/employee/auto-login', {{ method: 'POST' }});
-                if (r.ok) {{
-                    const d = await r.json();
-                    if (d.employee) {{
-                        currentEmployee = d.employee;
-                        localStorage.setItem("persistent_emp_id", currentEmployee.id);
-                        showMainDashboard();
-                        return;
-                    }}
-                }}
-            }} catch (e) {{}}
-
             showAuthView();
+            loadEmployeeRoster();
         }}
 
         function showAuthView() {{
             document.getElementById('empAuthView').style.display = 'block';
             document.getElementById('empMainDashboard').style.display = 'none';
+            const btnH = document.getElementById('btnHeaderSwitch');
+            if (btnH) btnH.style.display = 'none';
         }}
 
         function showMainDashboard() {{
             document.getElementById('empAuthView').style.display = 'none';
             document.getElementById('empMainDashboard').style.display = 'block';
+            const btnH = document.getElementById('btnHeaderSwitch');
+            if (btnH) btnH.style.display = 'inline-flex';
 
             document.getElementById('dispEmpName').innerText = currentEmployee.name;
             document.getElementById('dispEmpCode').innerText = currentEmployee.employee_code;
@@ -689,6 +729,7 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
                 if (res.ok) {{
                     const data = await res.json();
                     currentEmployee = data.employee;
+                    localStorage.removeItem("portal_account_switched");
                     localStorage.setItem("persistent_emp_id", currentEmployee.id);
                     errDiv.style.display = 'none';
                     showMainDashboard();
@@ -701,22 +742,28 @@ EMPLOYEE_HTML_PAGE = f"""<!DOCTYPE html>
         }}
 
         async function switchEmployeeAccount() {{
+            const empName = currentEmployee ? currentEmployee.name : "Employee";
+            if (!confirm(`Switch Workstation Account?\n\nCurrently signed in as ${{empName}}.\nDo you want to switch or link this portal to a different employee account?`)) {{
+                return;
+            }}
             try {{
                 await fetch('/api/employee/logout', {{ method: 'POST' }});
             }} catch (e) {{}}
             localStorage.removeItem("persistent_emp_id");
+            localStorage.setItem("portal_account_switched", "true");
             currentEmployee = null;
             document.getElementById('authCodeInput').value = '';
             document.getElementById('authPinInput').value = '';
             showAuthView();
+            loadEmployeeRoster();
         }}
-
         async function pollLiveStatus() {{
             if (!currentEmployee) return;
             try {{
                 const res = await fetch('/api/live-status');
                 if (!res.ok) return;
                 const data = await res.json();
+                latestData = data;
 
                 const badge = document.getElementById('liveStatusBadge');
                 const badgeText = document.getElementById('liveStatusText');
@@ -2388,12 +2435,23 @@ async def serve_admin_portal():
     return resp
 
 # --- Employee Authentication & Persistent Session Endpoints ---
+@app.get("/api/employee/roster")
+async def api_employee_roster():
+    """Returns active registered employees for quick account selection."""
+    emps = database.get_all_employees()
+    return [{"id": e["id"], "name": e["name"], "employee_code": e["employee_code"]} for e in emps]
+
 @app.post("/api/employee/auth")
 async def api_employee_auth(req: EmployeeAuthRequest):
     emp = database.verify_employee_credentials(req.code, req.pin)
     if not emp:
         raise HTTPException(status_code=401, detail="Invalid Employee Code or PIN.")
     database.set_authenticated_employee(emp["id"])
+    with engine_lock:
+        assigned_threshold = emp.get("idle_threshold", 300)
+        global_engine.set_idle_threshold(assigned_threshold)
+        if global_engine.state != TrackerState.LOGGED_OUT:
+            global_engine.end_day(manual=True)
     return {"status": "ok", "employee": emp}
 
 @app.get("/api/employee/me")
@@ -2413,8 +2471,13 @@ async def api_employee_me(employee_id: Optional[int] = Query(None)):
 
 @app.post("/api/employee/logout")
 async def api_employee_logout():
-    # Permanent login: maintain authenticated employee identity
-    return {"status": "ok", "message": "Persistent login active"}
+    """Unlinks workstation and ends active session for account switching."""
+    database.clear_authenticated_employee()
+    with engine_lock:
+        if global_engine.state != TrackerState.LOGGED_OUT:
+            global_engine.end_day(manual=True)
+        latest_stats["login_time"] = "--:--"
+    return {"status": "ok", "message": "Logged out and workstation unassigned"}
 
 @app.get("/api/live-status")
 async def api_live_status():
@@ -2439,7 +2502,7 @@ async def api_live_status():
             "intervals": intervals,
             "app_usage": app_usage,
             "website_usage": web_usage,
-            "login_time": latest_stats.get("login_time", "--:--") if is_active else "--:--"
+            "login_time": global_engine.session_start_datetime.strftime("%I:%M:%S %p") if (is_active and global_engine.session_start_datetime) else (latest_stats.get("login_time", "--:--") if is_active else "--:--")
         }
     return data
 
