@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QFrame, QLineEdit, QDialog, QSystemTrayIcon, QMenu,
-    QSizePolicy
+    QSizePolicy, QComboBox
 )
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QBrush, QPen, QPalette
