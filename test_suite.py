@@ -24,7 +24,7 @@ def run_tests():
     # 3. Admin Login
     req = urllib.request.Request(
         'http://127.0.0.1:8000/api/admin/login',
-        data=json.dumps({'username': 'admin', 'password': 'admin123'}).encode('utf-8'),
+        data=json.dumps({'username': 'admin', 'password': 'siva@1978'}).encode('utf-8'),
         headers={'Content-Type': 'application/json'}
     )
     res = urllib.request.urlopen(req)

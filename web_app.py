@@ -1054,7 +1054,7 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
             <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 8px;" onclick="executeAdminLogin()">
                 Sign In to Portal
             </button>
-            <p style="margin-top: 14px; font-size: 11px; color: var(--text-muted);">Default: <code>admin</code> / <code>admin123</code></p>
+            <p style="margin-top: 14px; font-size: 11px; color: var(--text-muted);">Default: <code>admin</code> / <code>siva@1978</code></p>
         </div>
 
         <!-- VIEW B: AUTHENTICATED MANAGEMENT PORTAL -->

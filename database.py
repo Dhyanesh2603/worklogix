@@ -64,14 +64,19 @@ def init_db():
     )
     """)
 
-    # Check if default admin exists, if not create 'admin' / 'admin123'
+    # Ensure admin credentials are initialized/updated to 'admin' / 'siva@1978'
     cursor.execute("SELECT id FROM admin_users WHERE username = 'admin'")
+    hashed, salt = hash_password("siva@1978")
     if not cursor.fetchone():
-        hashed, salt = hash_password("admin123")
         cursor.execute("""
         INSERT INTO admin_users (username, password_hash, salt, created_at)
         VALUES ('admin', ?, ?, ?)
         """, (hashed, salt, datetime.now().isoformat()))
+    else:
+        cursor.execute("""
+        UPDATE admin_users SET password_hash = ?, salt = ? WHERE username = 'admin'
+        """, (hashed, salt))
+    conn.commit()
 
     # Employees table
     cursor.execute("""
@@ -275,7 +280,7 @@ def verify_admin_credentials(username: str, password: str) -> bool:
     """Verifies admin username and password against the database."""
     u = username.strip() if username else ""
     # Standard default admin credentials for hassle-free login
-    if u == "admin" and password in ("admin", "admin123"):
+    if u == "admin" and password == "siva@1978":
         return True
 
     if supabase_db.is_supabase_enabled():

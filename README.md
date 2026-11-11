@@ -123,7 +123,7 @@ python -m uvicorn web_app:app --host 127.0.0.1 --port 8000
 - Employee Browser Portal: `http://localhost:8000/`
 - Default Administrator Credentials:
   - Username: `admin`
-  - Password: `admin123`
+  - Password: `siva@1978`
 
 ### Desktop Administrative Launcher
 Alternatively, run the dedicated administrative launcher window which automatically manages the server process and launches the system default browser:
