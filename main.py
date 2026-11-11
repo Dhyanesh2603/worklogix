@@ -1,5 +1,24 @@
 import sys
 import os
+try:
+    import certifi
+    ca_bundle = certifi.where()
+    if getattr(sys, 'frozen', False):
+        base_meipass = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        for cand in [
+            os.path.join(base_meipass, 'certifi', 'cacert.pem'),
+            os.path.join(base_meipass, 'cacert.pem'),
+            os.path.join(os.path.dirname(sys.executable), 'cacert.pem')
+        ]:
+            if os.path.exists(cand):
+                ca_bundle = cand
+                break
+    os.environ['SSL_CERT_FILE'] = ca_bundle
+    os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
+except Exception:
+    pass
+import sys
+import os
 from datetime import datetime, date, time as dtime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,

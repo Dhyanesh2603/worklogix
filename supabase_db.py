@@ -1,3 +1,22 @@
+import sys
+import os
+try:
+    import certifi
+    ca_bundle = certifi.where()
+    if getattr(sys, 'frozen', False):
+        base_meipass = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        for cand in [
+            os.path.join(base_meipass, 'certifi', 'cacert.pem'),
+            os.path.join(base_meipass, 'cacert.pem'),
+            os.path.join(os.path.dirname(sys.executable), 'cacert.pem')
+        ]:
+            if os.path.exists(cand):
+                ca_bundle = cand
+                break
+    os.environ['SSL_CERT_FILE'] = ca_bundle
+    os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
+except Exception:
+    pass
 import os
 import hashlib
 import secrets
@@ -172,7 +191,7 @@ def add_employee(
         h, s = hash_password(pin.strip() if pin else "1234")
         payload = {
             "name": name.strip(),
-            "employee_code": code.strip(),
+            "employee_code": code.strip().upper(),
             "pin_hash": h,
             "pin_salt": s,
             "shift_start": shift_start,
@@ -184,6 +203,12 @@ def add_employee(
         res = client.table("employees").insert(payload).execute()
         if res.data:
             return res.data[0]["id"]
+        raise RuntimeError("No employee record returned from Supabase insert.")
+    except Exception as e:
+        err_str = str(e)
+        if "duplicate key" in err_str.lower() or "unique constraint" in err_str.lower():
+            raise ValueError(f"Employee code '{code.strip().upper()}' already exists.")
+        print("[Supabase Error] add_employee:", e)
         raise RuntimeError("No employee record returned from Supabase insert.")
     except Exception as e:
         print("[Supabase Error] add_employee:", e)

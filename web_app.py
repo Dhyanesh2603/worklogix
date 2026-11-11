@@ -1,3 +1,22 @@
+import sys
+import os
+try:
+    import certifi
+    ca_bundle = certifi.where()
+    if getattr(sys, 'frozen', False):
+        base_meipass = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        for cand in [
+            os.path.join(base_meipass, 'certifi', 'cacert.pem'),
+            os.path.join(base_meipass, 'cacert.pem'),
+            os.path.join(os.path.dirname(sys.executable), 'cacert.pem')
+        ]:
+            if os.path.exists(cand):
+                ca_bundle = cand
+                break
+    os.environ['SSL_CERT_FILE'] = ca_bundle
+    os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
+except Exception:
+    pass
 import os
 import sys
 import secrets
@@ -24,6 +43,7 @@ database.init_db()
 
 # In-memory admin session storage
 ACTIVE_ADMIN_TOKENS: Set[str] = set()
+INVALIDATED_ADMIN_TOKENS: Set[str] = set()
 
 # System-wide background tracker engine running in Python
 global_engine = TrackerEngine(idle_threshold_seconds=300)
@@ -112,7 +132,7 @@ def create_admin_token(username: str) -> str:
     return f"{username}:{ts}:{sig}"
 
 def verify_token_validity(token: str) -> bool:
-    if not token:
+    if not token or token in INVALIDATED_ADMIN_TOKENS:
         return False
     if token in ACTIVE_ADMIN_TOKENS:
         return True
@@ -141,12 +161,6 @@ def verify_admin_token(
     token = x_admin_token or admin_token
     if token and verify_token_validity(token):
         return token
-    # Permanent Auto-Auth for Localhost & Admin Launcher
-    client_host = getattr(getattr(request, "client", None), "host", "")
-    if client_host in ("127.0.0.1", "::1", "localhost", "testclient"):
-        auto_tok = create_admin_token("admin")
-        ACTIVE_ADMIN_TOKENS.add(auto_tok)
-        return auto_tok
     raise HTTPException(status_code=401, detail="Administrator authorization required.")
 
 @app.post("/api/admin/auto-auth")
@@ -1004,7 +1018,14 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                     </svg>
                     Add Employee
                 </button>
-                <!-- Permanent Admin Session Active (No Logout) -->
+                <button id="adminSignOutBtn" class="btn btn-secondary btn-sm" style="display: none; align-items: center; gap: 6px; color: #DC2626;" onclick="executeAdminLogout()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                    Sign Out
+                </button>
             </div>
         </header>
 
@@ -1658,25 +1679,55 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
             if (tabName === 'websites') loadWebsitesData();
         }}
 
+        function clearAdminTokens() {{
+            localStorage.removeItem('adminToken');
+            sessionStorage.removeItem('adminToken');
+        }}
+
+        function showAdminLoginForm(errorMsg = null) {{
+            document.getElementById('adminLoginForm').style.display = 'block';
+            document.getElementById('adminDashboardContent').style.display = 'none';
+            document.getElementById('adminAddEmpBtn').style.display = 'none';
+            const sBtn = document.getElementById('adminSignOutBtn');
+            if (sBtn) sBtn.style.display = 'none';
+            const errDiv = document.getElementById('adminLoginError');
+            if (errDiv) {{
+                if (errorMsg) {{
+                    errDiv.innerText = errorMsg;
+                    errDiv.style.display = 'block';
+                }} else {{
+                    errDiv.style.display = 'none';
+                }}
+            }}
+            const userField = document.getElementById('adminUser');
+            if (userField && !userField.value) userField.value = 'admin';
+            const passField = document.getElementById('adminPass');
+            if (passField) passField.value = '';
+        }}
+
+        function showAdminDashboard() {{
+            document.getElementById('adminLoginForm').style.display = 'none';
+            document.getElementById('adminDashboardContent').style.display = 'block';
+            document.getElementById('adminAddEmpBtn').style.display = 'inline-flex';
+            const sBtn = document.getElementById('adminSignOutBtn');
+            if (sBtn) sBtn.style.display = 'inline-flex';
+            initDashboardDates();
+            loadEmployeesDropdown();
+            applyTimesheetFilters();
+        }}
+
         async function adminFetch(url, options = {{}}) {{
-            const token = sessionStorage.getItem('adminToken');
+            const token = localStorage.getItem('adminToken') || sessionStorage.getItem('adminToken');
             options.headers = options.headers || {{}};
+            options.credentials = 'same-origin';
             if (token) {{
                 options.headers['X-Admin-Token'] = token;
             }}
             try {{
                 const res = await fetch(url, options);
                 if (res.status === 401) {{
-                    sessionStorage.removeItem('adminToken');
-                    document.getElementById('adminLoginForm').style.display = 'block';
-                    document.getElementById('adminDashboardContent').style.display = 'none';
-                    document.getElementById('adminAddEmpBtn').style.display = 'none';
-                    document.getElementById('adminSignOutBtn').style.display = 'none';
-                    const errDiv = document.getElementById('adminLoginError');
-                    if (errDiv) {{
-                        errDiv.innerText = 'Session expired. Please log in again.';
-                        errDiv.style.display = 'block';
-                    }}
+                    clearAdminTokens();
+                    showAdminLoginForm('Session expired or unauthorized. Please sign in.');
                     return null;
                 }}
                 return res;
@@ -1687,28 +1738,21 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
         }}
 
         async function checkAuth() {{
-            // Permanent Admin Login: Auto-authenticate and immediately show dashboard
-            let token = localStorage.getItem('adminToken');
+            const token = localStorage.getItem('adminToken') || sessionStorage.getItem('adminToken');
             if (!token) {{
-                try {{
-                    const r = await fetch('/api/admin/auto-auth', {{ method: 'POST' }});
-                    if (r.ok) {{
-                        const d = await r.json();
-                        token = d.token;
-                        localStorage.setItem('adminToken', token);
-                    }}
-                }} catch (e) {{}}
+                showAdminLoginForm();
+                return;
             }}
-
-            document.getElementById('adminLoginForm').style.display = 'none';
-            document.getElementById('adminDashboardContent').style.display = 'block';
-            document.getElementById('adminAddEmpBtn').style.display = 'inline-flex';
-            const sBtn = document.getElementById('adminSignOutBtn');
-            if (sBtn) sBtn.style.display = 'none';
-
-            initDashboardDates();
-            loadEmployeesDropdown();
-            applyTimesheetFilters();
+            // Test existing token validity
+            try {{
+                const res = await adminFetch('/api/admin/employees');
+                if (res && res.ok) {{
+                    showAdminDashboard();
+                    return;
+                }}
+            }} catch (e) {{}}
+            clearAdminTokens();
+            showAdminLoginForm();
         }}
 
         function initDashboardDates() {{
@@ -1722,6 +1766,13 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
             const user = document.getElementById('adminUser').value.trim();
             const pass = document.getElementById('adminPass').value;
             const errDiv = document.getElementById('adminLoginError');
+            errDiv.style.display = 'none';
+
+            if (!user || !pass) {{
+                errDiv.innerText = 'Please enter both administrator username and password.';
+                errDiv.style.display = 'block';
+                return;
+            }}
 
             try {{
                 const res = await fetch('/api/admin/login', {{
@@ -1732,17 +1783,13 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
 
                 if (res.ok) {{
                     const data = await res.json();
+                    localStorage.setItem('adminToken', data.token);
                     sessionStorage.setItem('adminToken', data.token);
                     errDiv.style.display = 'none';
-                    document.getElementById('adminLoginForm').style.display = 'none';
-                    document.getElementById('adminDashboardContent').style.display = 'block';
-                    document.getElementById('adminAddEmpBtn').style.display = 'inline-flex';
-                    document.getElementById('adminSignOutBtn').style.display = 'inline-flex';
-                    initDashboardDates();
-                    loadEmployeesDropdown();
-                    applyTimesheetFilters();
+                    showAdminDashboard();
                 }} else {{
-                    errDiv.innerText = 'Invalid username or password.';
+                    const errData = await res.json().catch(() => ({{}}));
+                    errDiv.innerText = errData.detail || 'Invalid username or password.';
                     errDiv.style.display = 'block';
                 }}
             }} catch (e) {{
@@ -1752,15 +1799,15 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
         }}
 
         async function executeAdminLogout() {{
-            const token = sessionStorage.getItem('adminToken');
+            const token = localStorage.getItem('adminToken') || sessionStorage.getItem('adminToken');
             try {{
                 await fetch('/api/admin/logout', {{
                     method: 'POST',
-                    headers: {{ 'X-Admin-Token': token }}
+                    headers: {{ 'X-Admin-Token': token || '' }}
                 }});
             }} catch (e) {{}}
-            sessionStorage.removeItem('adminToken');
-            checkAuth();
+            clearAdminTokens();
+            showAdminLoginForm();
         }}
 
         async function loadEmployeesDropdown() {{
@@ -2180,8 +2227,8 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
             const name = document.getElementById('newEmpName').value.trim();
             const code = document.getElementById('newEmpCode').value.trim();
             const pin = document.getElementById('newEmpPin').value.trim() || "1234";
-            const shift_start = document.getElementById('newEmpShiftStart').value;
-            const shift_end = document.getElementById('newEmpShiftEnd').value;
+            let shift_start = document.getElementById('newEmpShiftStart').value;
+            let shift_end = document.getElementById('newEmpShiftEnd').value;
             const is_auto_start = document.getElementById('newEmpAutoStart').checked;
 
             if (!name || !code) {{
@@ -2189,20 +2236,26 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                 return;
             }}
 
+            if (!shift_start) shift_start = '09:30';
+            if (!shift_end) shift_end = '18:00';
+
             const res = await adminFetch('/api/admin/employees', {{
                 method: 'POST',
                 headers: {{ 'Content-Type': 'application/json' }},
-                body: JSON.stringify({{ name, code, pin, shift_start, shift_end, is_auto_start }})
+                body: JSON.stringify({{ name, code, pin, shift_start, shift_end, is_auto_start, idle_threshold: 300 }})
             }});
 
             if (res && res.ok) {{
-                alert("Employee added successfully!");
+                alert(`Employee "${{name}}" (${{code}}) added successfully!`);
                 document.getElementById('newEmpName').value = "";
                 document.getElementById('newEmpCode').value = "";
                 loadEmployeesDropdown();
                 loadShiftsData();
+            }} else if (res) {{
+                const data = await res.json().catch(() => ({{}}));
+                alert(data.detail || "Error adding employee. Check for duplicate code.");
             }} else {{
-                alert("Error adding employee. Check for duplicate code.");
+                alert("Authorization error. Please sign in again.");
             }}
         }}
 
@@ -2386,17 +2439,22 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
             const name = document.getElementById('modalEmpName').value.trim();
             const code = document.getElementById('modalEmpCode').value.trim();
             const pin = document.getElementById('modalEmpPin').value.trim() || '1234';
-            const shift_start = document.getElementById('modalEmpShiftStart').value;
-            const shift_end = document.getElementById('modalEmpShiftEnd').value;
-            const idle_threshold = parseInt(document.getElementById('modalEmpThreshold').value, 10);
+            let shift_start = document.getElementById('modalEmpShiftStart').value;
+            let shift_end = document.getElementById('modalEmpShiftEnd').value;
+            let idle_threshold = parseInt(document.getElementById('modalEmpThreshold').value, 10);
             const is_auto_start = document.getElementById('modalEmpAutoStart').checked;
             const errDiv = document.getElementById('modalAddEmpError');
+            errDiv.style.display = 'none';
 
             if (!name || !code) {{
                 errDiv.innerText = "Please provide both Full Name and Employee Code.";
                 errDiv.style.display = 'block';
                 return;
             }}
+
+            if (!shift_start) shift_start = '09:30';
+            if (!shift_end) shift_end = '18:00';
+            if (isNaN(idle_threshold) || idle_threshold <= 0) idle_threshold = 300;
 
             try {{
                 const res = await adminFetch('/api/admin/employees', {{
@@ -2408,12 +2466,17 @@ ADMIN_HTML_PAGE = f"""<!DOCTYPE html>
                 if (res && res.ok) {{
                     closeAddEmployeeModal();
                     alert(`Employee "${{name}}" (${{code}}) successfully registered!`);
+                    document.getElementById('modalEmpName').value = "";
+                    document.getElementById('modalEmpCode').value = "";
                     loadEmployeesDropdown();
                     loadShiftsData();
                     applyTimesheetFilters();
                 }} else if (res) {{
-                    const data = await res.json();
+                    const data = await res.json().catch(() => ({{}}));
                     errDiv.innerText = data.detail || "Error adding employee. Check for duplicate code.";
+                    errDiv.style.display = 'block';
+                }} else {{
+                    errDiv.innerText = "Authorization error or server unavailable. Please sign in again.";
                     errDiv.style.display = 'block';
                 }}
             }} catch (e) {{
@@ -2438,11 +2501,7 @@ async def serve_employee_view():
 
 @app.get("/admin", response_class=HTMLResponse)
 async def serve_admin_portal():
-    token = create_admin_token("admin")
-    ACTIVE_ADMIN_TOKENS.add(token)
-    resp = HTMLResponse(content=ADMIN_HTML_PAGE)
-    resp.set_cookie(key="admin_token", value=token, max_age=3153600000, httponly=False, samesite="lax")
-    return resp
+    return HTMLResponse(content=ADMIN_HTML_PAGE)
 
 # --- Employee Authentication & Persistent Session Endpoints ---
 @app.get("/api/employee/roster")
@@ -2553,14 +2612,20 @@ async def api_admin_login(req: AdminLoginRequest, response: Response):
 
     token = create_admin_token(req.username)
     ACTIVE_ADMIN_TOKENS.add(token)
-    response.set_cookie(key="admin_token", value=token, httponly=True)
+    response.set_cookie(key="admin_token", value=token, max_age=86400 * 30, httponly=False, samesite="lax")
     return {"status": "ok", "token": token, "username": req.username}
 
 @app.post("/api/admin/logout")
-async def api_admin_logout(token: str = Depends(verify_admin_token), response: Response = None):
-    ACTIVE_ADMIN_TOKENS.discard(token)
-    if response:
-        response.delete_cookie(key="admin_token")
+async def api_admin_logout(
+    response: Response,
+    x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token"),
+    admin_token: Optional[str] = Cookie(None)
+):
+    token = x_admin_token or admin_token
+    if token:
+        INVALIDATED_ADMIN_TOKENS.add(token)
+        ACTIVE_ADMIN_TOKENS.discard(token)
+    response.delete_cookie(key="admin_token")
     return {"status": "ok", "message": "Logged out"}
 
 # --- Admin Management Endpoints ---
@@ -2575,8 +2640,13 @@ async def api_add_admin_employee(req: AddEmployeeRequest, token: str = Depends(v
             req.name, req.code, req.pin, req.shift_start, req.shift_end, req.is_auto_start, req.idle_threshold
         )
         return {"status": "ok", "employee_id": emp_id}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        err_msg = str(e)
+        if "UNIQUE constraint failed" in err_msg or "duplicate key" in err_msg.lower():
+            err_msg = f"Employee code '{req.code}' already exists. Please choose a different code."
+        raise HTTPException(status_code=400, detail=err_msg)
 
 @app.post("/api/admin/employees/{employee_id}/shift")
 async def api_update_employee_shift(employee_id: int, req: EmployeeShiftUpdateRequest, token: str = Depends(verify_admin_token)):
