@@ -272,6 +272,31 @@ def set_authenticated_employee(employee_id: int):
     """Persists authenticated employee so they do not have to sign in every day."""
     set_setting("auth_employee_id", str(employee_id))
 
+def has_completed_session_today(employee_id: int, date_str: Optional[str] = None) -> bool:
+    """Checks if an employee has already completed or finished a session on the given date."""
+    if not date_str:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    if supabase_db.is_supabase_enabled():
+        try:
+            client = supabase_db.get_supabase_client()
+            res = client.table("sessions").select("id").eq("employee_id", employee_id).eq("date", date_str).eq("status", "COMPLETED").limit(1).execute()
+            if res.data:
+                return True
+        except Exception as e:
+            print("[Database Warning] Supabase has_completed_session_today failed:", e)
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT id FROM sessions
+    WHERE employee_id = ? AND date = ? AND status = 'COMPLETED'
+    LIMIT 1
+    """, (employee_id, date_str))
+    row = cursor.fetchone()
+    conn.close()
+    return bool(row)
+
 def clear_authenticated_employee():
     """Clears local authentication (switch employee)."""
     set_setting("auth_employee_id", "")

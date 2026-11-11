@@ -255,6 +255,7 @@ class TrackerEngine:
         self.session_start_datetime: Optional[datetime] = None
         self.is_session_started_in_shift: bool = False
         self.manual_clock_out_date: Optional[date] = None
+        self.shift_completed_date: Optional[date] = None
 
         # Cumulative totals for current session (in seconds)
         self.total_active_sec = 0
@@ -308,7 +309,8 @@ class TrackerEngine:
         
         now = datetime.now()
         self.session_start_datetime = now
-        self.manual_clock_out_date = None
+        if not is_auto:
+            self.manual_clock_out_date = None
 
         # Detect whether this session started within the scheduled shift
         try:
@@ -383,8 +385,9 @@ class TrackerEngine:
         if self.state == TrackerState.LOGGED_OUT:
             return
 
-        if manual:
-            self.manual_clock_out_date = datetime.now().date()
+        today = datetime.now().date()
+        self.manual_clock_out_date = today
+        self.shift_completed_date = today
 
         now = datetime.now()
         # Commit the active/lunch/inactive interval that was running
@@ -548,7 +551,7 @@ class TrackerEngine:
             })
 
     def check_shift_window(self, emp_id: int):
-        """Checks individual employee's admin shift schedule and automatically activates or ends work session."""
+        """Checks individual employee's admin shift schedule and automatically activates work session once per day."""
         try:
             cfg = database.get_employee_shift(emp_id)
             if not cfg or not cfg.get("is_auto_start"):
@@ -557,6 +560,18 @@ class TrackerEngine:
             now = datetime.now()
             now_time = now.time()
             today_date = now.date()
+
+            # Rule 1: Once-per-day enforcement.
+            # If the session was already completed or clocked out today, auto-start stays DISABLED for the rest of today.
+            if self.shift_completed_date == today_date or self.manual_clock_out_date == today_date:
+                return
+
+            # Check database persistence: if employee already completed a session today, disable auto-start
+            today_str = today_date.strftime("%Y-%m-%d")
+            if hasattr(database, 'has_completed_session_today') and database.has_completed_session_today(emp_id, today_str):
+                self.shift_completed_date = today_date
+                self.manual_clock_out_date = today_date
+                return
 
             start_parts = [int(p) for p in cfg["shift_start"].split(":")]
             end_parts = [int(p) for p in cfg["shift_end"].split(":")]
@@ -571,18 +586,16 @@ class TrackerEngine:
             else:
                 in_shift = (shift_start <= now_time < shift_end)
 
-            if in_shift:
-                # In shift window: Auto-start if logged out and not manually clocked out today
-                if self.state == TrackerState.LOGGED_OUT:
-                    if self.manual_clock_out_date != today_date:
-                        self.start_day(emp_id, is_auto=True)
-            else:
-                # Outside shift window: Do NOT auto-end!
-                # Employees can work into overtime as long as needed.
-                # The session will only end if:
-                # 1. They manually click End Shift / Clock Out or quit the app.
-                # 2. Prolonged inactivity of 20 minutes (1200 seconds) is reached.
-                pass
+            if in_shift and self.state == TrackerState.LOGGED_OUT:
+                # Rule 2: Physical presence check - NEVER auto-start if the laptop is currently idle!
+                # Auto-start should ONLY trigger when the employee actually moves their mouse or types.
+                idle_sec = get_idle_seconds()
+                if idle_sec > 5.0:
+                    # Laptop is currently unattended. Wait until employee physically touches it.
+                    return
+
+                # All conditions met: Auto-start session once for today!
+                self.start_day(emp_id, is_auto=True)
         except Exception as e:
             pass
 

@@ -70,26 +70,8 @@ def on_engine_tick(stats):
 
 global_engine.on_tick = on_engine_tick
 
-# Background daemon thread: monitors hardware, employee's assigned shift, websites, idle
-def background_tracking_loop():
-    attach_to_interactive_desktop()
-    while True:
-        try:
-            with engine_lock:
-                auth_emp = database.get_authenticated_employee()
-                if auth_emp:
-                    emp_id = auth_emp["id"]
-                    # Automatically starts/stops on that employee's assigned shift
-                    global_engine.check_shift_window(emp_id)
-
-                    if global_engine.state != TrackerState.LOGGED_OUT:
-                        global_engine.tick()
-        except Exception as e:
-            print("Background tracking loop error:", e)
-        time.sleep(1)
-
-bg_thread = threading.Thread(target=background_tracking_loop, daemon=True)
-bg_thread.start()
+# Note: Hardware tracking engine loop is intentionally disabled in the Admin Portal.
+# Workstation tracking is managed exclusively by OfficeTracker.exe on employee PCs.
 
 # --- Pydantic Request Models ---
 class EmployeeAuthRequest(BaseModel):
